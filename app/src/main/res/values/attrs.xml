@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="GaugeView">
+        <attr name="gaugeLabel" format="string" />
+        <attr name="gaugeUnit" format="string" />
+        <attr name="gaugeMin" format="float" />
+        <attr name="gaugeMax" format="float" />
+        <attr name="gaugeRedline" format="float" />
+        <attr name="gaugeDecimals" format="integer" />
+    </declare-styleable>
+
+    <attr name="gaugeAccent" format="color" />
+    <attr name="gaugeWarn" format="color" />
+    <attr name="gaugeTrack" format="color" />
+</resources>
