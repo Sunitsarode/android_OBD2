@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark by design: a bright dashboard is a glare source at night. -->
+    <color name="bg">#0B0F14</color>
+    <color name="surface">#141A21</color>
+    <color name="surface_variant">#1C242D</color>
+    <color name="outline">#2A3441</color>
+
+    <color name="accent">#22D3EE</color>
+    <color name="accent_dim">#0E7490</color>
+    <color name="amber">#FBBF24</color>
+    <color name="danger">#F87171</color>
+    <color name="ok">#34D399</color>
+
+    <color name="text_primary">#E6EDF3</color>
+    <color name="text_secondary">#8B98A5</color>
+    <color name="track">#1F2933</color>
+</resources>
