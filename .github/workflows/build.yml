@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -20,11 +20,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
+      # The ubuntu-latest image ships the Android SDK with licences already
+      # accepted, so there is no need for a third-party setup action. We only
+      # have to guarantee the exact platform this project compiles against.
       - name: Install SDK platform 34
-        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+        run: |
+          set -e
+          SDKMANAGER="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -name sdkmanager | head -1)"
+          echo "Using $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -34,8 +40,8 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      # Signed with the debug key, so this is a convenience build, not a
-      # distribution build. Failing here should not cost us the debug APK.
+      # Signed with the debug key, so this is a convenience build rather than a
+      # distribution build. Failing here must not cost us the debug APK.
       - name: Build release APK
         continue-on-error: true
         run: gradle assembleRelease --no-daemon --stacktrace
