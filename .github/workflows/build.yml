@@ -38,7 +38,21 @@ jobs:
           gradle-version: '8.4'
 
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+
+      # Raw logs need admin rights to download, but annotations on a public
+      # repo are readable by anyone, so re-emit compiler errors as annotations.
+      - name: Surface build errors
+        if: failure()
+        run: |
+          grep -E '^e: |[Ee]rror: |ERROR:' build.log | grep -v '^[[:space:]]*at ' | awk '!seen[$0]++' > errors.txt || true
+          head -10 errors.txt | while IFS= read -r l; do echo "::error::$l"; done
+          sed -n '11,20p' errors.txt | while IFS= read -r l; do echo "::warning::$l"; done
+          if [ ! -s errors.txt ]; then
+            grep -A6 'What went wrong' build.log | head -10 | while IFS= read -r l; do echo "::error::$l"; done
+          fi
 
       # Signed with the debug key, so this is a convenience build rather than a
       # distribution build. Failing here must not cost us the debug APK.
