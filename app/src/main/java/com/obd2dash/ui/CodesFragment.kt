@@ -15,7 +15,9 @@ import com.obd2dash.R
 import com.obd2dash.core.ObdRepository
 import com.obd2dash.databinding.FragmentCodesBinding
 import com.obd2dash.databinding.ItemDtcBinding
+import com.obd2dash.core.Prefs
 import com.obd2dash.obd.Dtc
+import com.obd2dash.obd.Pids
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -47,6 +49,7 @@ class CodesFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch { ObdRepository.dtcs.collectLatest { renderCodes(it) } }
                 launch { ObdRepository.milStatus.collectLatest { renderStatus(it) } }
+                launch { ObdRepository.freezeFrame.collectLatest { renderFreezeFrame(it) } }
                 launch {
                     ObdRepository.vehicleInfo.collectLatest { info ->
                         binding?.vehicleInfo?.text = listOfNotNull(
@@ -113,6 +116,24 @@ class CodesFragment : Fragment() {
             }
             container.addView(row)
         }
+    }
+
+    /** What the engine was doing when the fault was stored: often the best clue to its cause. */
+    private fun renderFreezeFrame(frame: Dtc.FreezeFrame?) {
+        val view = binding?.freezeFrame ?: return
+        if (frame == null || frame.values.isEmpty()) {
+            view.visibility = View.GONE
+            return
+        }
+        val imperial = Prefs(requireContext()).imperialUnits
+        val parts = frame.values.mapNotNull { (id, value) ->
+            Pids.BY_ID[id]?.let { pid ->
+                val (text, unit) = Format.pidValue(pid, value, imperial)
+                pid.short + " " + text + (if (unit.isEmpty()) "" else " " + unit)
+            }
+        }
+        view.text = "Freeze frame" + (frame.dtc?.let { " for " + it } ?: "") + "\n" + parts.joinToString("\n")
+        view.visibility = View.VISIBLE
     }
 
     private fun renderCodes(entries: List<Dtc.Entry>) {

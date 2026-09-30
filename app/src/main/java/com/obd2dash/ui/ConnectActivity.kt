@@ -107,9 +107,9 @@ class ConnectActivity : AppCompatActivity() {
         receiverRegistered = true
 
         // Jump straight to the dashboard when a session is already running.
-        if (ObdRepository.connectionState.value == ObdRepository.ConnState.CONNECTED) {
+        if (isLive(ObdRepository.connectionState.value)) {
             openDashboard()
-        } else if (prefs.autoConnect && prefs.lastDeviceAddress != null) {
+        } else if (prefs.autoConnect && prefs.lastDeviceAddress != null && !ObdRepository.userDisconnected) {
             binding.statusText.text = "Auto-connecting to " + (prefs.lastDeviceName ?: "last adapter")
             connect(prefs.lastDeviceAddress!!, prefs.lastDeviceName)
         }
@@ -130,10 +130,14 @@ class ConnectActivity : AppCompatActivity() {
         }
         lifecycleScope.launch {
             ObdRepository.connectionState.collectLatest { state ->
-                if (state == ObdRepository.ConnState.CONNECTED) openDashboard()
+                if (isLive(state)) openDashboard()
             }
         }
     }
+
+    /** Connected, or holding the connection while the ignition is off. */
+    private fun isLive(state: ObdRepository.ConnState) =
+        state == ObdRepository.ConnState.CONNECTED || state == ObdRepository.ConnState.WAITING_FOR_ECU
 
     /**
      * Hands off to the dashboard and drops out of the back stack, so Back from
@@ -210,6 +214,7 @@ class ConnectActivity : AppCompatActivity() {
     }
 
     private fun connect(address: String, name: String?) {
+        ObdRepository.userDisconnected = false
         cancelDiscovery()
         prefs.lastDeviceAddress = address
         prefs.lastDeviceName = name

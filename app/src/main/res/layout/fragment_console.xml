@@ -5,6 +5,14 @@
     android:orientation="vertical"
     android:padding="10dp">
 
+    <TextView
+        android:id="@+id/pollModeText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingBottom="6dp"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp" />
+
     <ScrollView
         android:id="@+id/consoleScroll"
         android:layout_width="match_parent"
@@ -23,10 +31,14 @@
             android:textIsSelectable="true" />
     </ScrollView>
 
+    <CheckBox
+        android:id="@+id/verbose"
+        style="@style/SettingCheck"
+        android:text="Show live polling traffic (slows weak head units)" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
         android:orientation="horizontal">
 
         <EditText
@@ -35,12 +47,12 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:hint="ATZ, 010C, 03 ..."
-            android:inputType="textCapCharacters|textNoSuggestions"
+            android:importantForAutofill="no"
             android:imeOptions="actionSend"
+            android:inputType="textCapCharacters|textNoSuggestions"
             android:maxLines="1"
             android:textColor="@color/text_primary"
-            android:textColorHint="@color/text_secondary"
-            android:importantForAutofill="no" />
+            android:textColorHint="@color/text_secondary" />
 
         <Button
             android:id="@+id/sendCommand"

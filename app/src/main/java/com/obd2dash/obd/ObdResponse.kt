@@ -3,9 +3,9 @@ package com.obd2dash.obd
 /**
  * Turns raw ELM327 text into usable bytes.
  *
- * An adapter with echo/spaces/headers off still gives us a surprising amount of
- * noise: search chatter, ISO-TP frame indices, and one reply per responding ECU.
- * Everything here is defensive on purpose - cheap clone adapters are inconsistent.
+ * A reply can hold several messages: one per responding ECU, and multi-frame
+ * messages split across indexed lines. Each message is kept separate so that
+ * one module's bytes are never read as part of another's.
  */
 object ObdResponse {
 
@@ -28,23 +28,49 @@ object ObdResponse {
         return null
     }
 
+    private fun isHex(s: String) = s.isNotEmpty() && s.all { it in '0'..'9' || it in 'A'..'F' }
+
     /**
-     * Flattens a reply to one uppercase hex string, dropping frame bookkeeping.
-     * Multi-frame replies arrive as a length header plus N: indexed lines.
+     * One uppercase hex string per ECU message. Lines that are not pure hex
+     * (OK, SEARCHING..., the adapter banner) are skipped rather than filtered,
+     * so their letters can never be mistaken for data.
      */
-    fun payload(raw: String): String {
-        val sb = StringBuilder()
-        raw.split('\r', '\n')
-            .map { it.trim().replace(" ", "").uppercase() }
-            .filter { it.isNotEmpty() && !it.startsWith("SEARCHING") && !it.startsWith("BUSINIT") }
-            .forEach { line ->
-                when {
-                    FRAME_LEN.matches(line) -> Unit
-                    FRAME_IDX.containsMatchIn(line) -> sb.append(line.substring(2))
-                    else -> sb.append(line)
+    fun messages(raw: String): List<String> {
+        val out = ArrayList<String>()
+        var multi: StringBuilder? = null
+        var multiBytes = 0
+
+        fun closeMulti() {
+            val m = multi ?: return
+            val hex = m.toString()
+            // The length header is exact; anything past it is frame padding.
+            out += if (multiBytes > 0 && hex.length > multiBytes * 2) hex.substring(0, multiBytes * 2) else hex
+            multi = null
+        }
+
+        for (rawLine in raw.split('\r', '\n')) {
+            val line = rawLine.trim().replace(" ", "").uppercase()
+            if (line.isEmpty()) continue
+            when {
+                FRAME_LEN.matches(line) -> {
+                    closeMulti()
+                    multi = StringBuilder()
+                    multiBytes = line.toInt(16)
+                }
+                FRAME_IDX.containsMatchIn(line) -> {
+                    val data = line.substring(2)
+                    if (!isHex(data)) continue
+                    val m = multi ?: StringBuilder().also { multi = it; multiBytes = 0 }
+                    m.append(data)
+                }
+                isHex(line) -> {
+                    closeMulti()
+                    out += line
                 }
             }
-        return sb.filter { it in '0'..'9' || it in 'A'..'F' }.toString()
+        }
+        closeMulti()
+        return out.filter { it.length >= 2 }
     }
 
     fun hexToBytes(hex: String): IntArray {
@@ -52,28 +78,60 @@ object ObdResponse {
         return IntArray(n) { hex.substring(it * 2, it * 2 + 2).toInt(16) }
     }
 
-    /**
-     * Extracts the data bytes of a positive reply to [mode]/[pid].
-     * Positive replies echo the mode with 0x40 added, then the PID.
-     * Only the first responding ECU is used.
-     */
-    fun dataFor(mode: Int, pid: Int, expectedLen: Int, raw: String): IntArray? {
-        val hex = payload(raw)
-        val marker = "%02X%02X".format(mode + 0x40, pid)
-        val idx = hex.indexOf(marker)
-        if (idx < 0) return null
-        val body = hex.substring(idx + marker.length)
-        if (body.length < expectedLen * 2) return null
-        return hexToBytes(body.substring(0, expectedLen * 2))
+    private fun marker(vararg bytes: Int) = bytes.joinToString("") { "%02X".format(it) }
+
+    /** Data bytes of the first ECU's positive reply to [mode]/[pid]. */
+    fun dataFor(mode: Int, pid: Int, expectedLen: Int, raw: String): IntArray? =
+        allDataFor(mode, pid, expectedLen, raw).firstOrNull()
+
+    /** Data bytes from every ECU that answered [mode]/[pid]. */
+    fun allDataFor(mode: Int, pid: Int, expectedLen: Int, raw: String): List<IntArray> {
+        val m = marker(mode + 0x40, pid)
+        return messages(raw).mapNotNull { msg ->
+            if (!msg.startsWith(m) || msg.length < m.length + expectedLen * 2) null
+            else hexToBytes(msg.substring(m.length, m.length + expectedLen * 2))
+        }
     }
 
-    /** Data bytes of a reply to a mode that carries no PID echo (03, 07, 0A). */
-    fun bodyFor(mode: Int, raw: String): IntArray? {
-        val hex = payload(raw)
-        val marker = "%02X".format(mode + 0x40)
-        val idx = hex.indexOf(marker)
-        if (idx < 0) return null
-        val body = hex.substring(idx + marker.length)
-        return hexToBytes(if (body.length % 2 == 1) body.dropLast(1) else body)
+    /** Per-ECU bodies after the service byte, for modes with no PID echo (03, 07, 0A). */
+    fun bodiesFor(mode: Int, raw: String): List<IntArray> {
+        val m = marker(mode + 0x40)
+        return messages(raw).filter { it.startsWith(m) }.map { msg ->
+            val body = msg.substring(m.length)
+            hexToBytes(if (body.length % 2 == 1) body.dropLast(1) else body)
+        }
+    }
+
+    /**
+     * Parses a multi-PID mode 01 reply: 0x41 followed by (pid, data) groups in
+     * any order. [lengths] gives each requested PID's data length, which is the
+     * only way to tell where one group ends and the next begins.
+     */
+    fun multiPid(raw: String, lengths: Map<Int, Int>): Map<Int, IntArray> {
+        val out = HashMap<Int, IntArray>()
+        for (msg in messages(raw)) {
+            if (!msg.startsWith("41")) continue
+            val bytes = hexToBytes(msg.substring(2))
+            var i = 0
+            while (i < bytes.size) {
+                val len = lengths[bytes[i]] ?: break
+                if (i + 1 + len > bytes.size) break
+                if (!out.containsKey(bytes[i])) out[bytes[i]] = bytes.copyOfRange(i + 1, i + 1 + len)
+                i += 1 + len
+            }
+        }
+        return out
+    }
+
+    /** Freeze frame reply: 0x42, the PID, the frame number, then the data. */
+    fun freezeFrameData(pid: Int, expectedLen: Int, raw: String): IntArray? {
+        val m = marker(0x42, pid)
+        for (msg in messages(raw)) {
+            if (!msg.startsWith(m)) continue
+            val start = m.length + 2
+            if (msg.length < start + expectedLen * 2) continue
+            return hexToBytes(msg.substring(start, start + expectedLen * 2))
+        }
+        return null
     }
 }

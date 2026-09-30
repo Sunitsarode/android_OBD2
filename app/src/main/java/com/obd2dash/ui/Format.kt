@@ -53,6 +53,7 @@ object Format {
      */
     fun pidValue(pid: Pids.Pid, value: Float?, imperial: Boolean): Pair<String, String> {
         if (value == null) return "--" to pid.unit
+        if (pid.id == Pids.FUEL_SYSTEM) return fuelSystem(value) to ""
         if (!imperial) return num(value, decimalsFor(pid)) to pid.unit
         return when (pid.unit) {
             "km/h" -> speed(value, true) to "mph"
@@ -62,6 +63,26 @@ object Format {
             "L/h" -> num(value * 0.219969f, 2) to "gal/h"
             else -> num(value, decimalsFor(pid)) to pid.unit
         }
+    }
+
+    const val RUPEE = "₹"
+
+    /** Money without clutter: paise under 100, whole rupees above. */
+    fun money(v: Float?): String = when (pid.unit) {
+        v == null -> "--"
+        v < 100f -> RUPEE + "%.2f".format(v)
+        else -> RUPEE + "%.0f".format(v)
+    }
+
+    /** PID 03 is a code, not a quantity. */
+    fun fuelSystem(code: Float?): String = when (code?.toInt()) {
+        null -> "--"
+        1 -> "Open loop (warming up)"
+        2 -> "Closed loop"
+        4 -> "Open loop (load / fuel cut)"
+        8 -> "Open loop (fault)"
+        16 -> "Closed loop (sensor fault)"
+        else -> "Code " + code?.toInt()
     }
 
     private fun decimalsFor(pid: Pids.Pid): Int = when (pid.unit) {

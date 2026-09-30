@@ -18,11 +18,48 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             app:gaugeLabel="RPM"
-            app:gaugeUnit="x1000 rpm"
+            app:gaugeUnit="rpm"
             app:gaugeMin="0"
             app:gaugeMax="8000"
             app:gaugeRedline="6000"
             app:gaugeDecimals="0" />
+
+        <LinearLayout
+            android:id="@+id/gearColumn"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:minWidth="76dp"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="GEAR"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:letterSpacing="0.1" />
+
+            <TextView
+                android:id="@+id/gearValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="-"
+                android:textColor="@color/text_primary"
+                android:textSize="64sp"
+                android:textStyle="bold"
+                android:includeFontPadding="false" />
+
+            <TextView
+                android:id="@+id/shiftHint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="SHIFT UP"
+                android:textColor="@color/amber"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:visibility="invisible" />
+        </LinearLayout>
 
         <com.obd2dash.ui.view.GaugeView
             android:id="@+id/gaugeSpeed"
@@ -33,6 +70,7 @@
             app:gaugeUnit="km/h"
             app:gaugeMin="0"
             app:gaugeMax="200"
+            app:gaugeRedline="-1"
             app:gaugeDecimals="0" />
     </LinearLayout>
 

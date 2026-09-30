@@ -10,40 +10,81 @@ Built to run both on a phone and sideloaded onto a car's Android head unit.
 ## Features
 
 **Live dashboard**
-- Analogue RPM and speed gauges with configurable redline, eased between samples
-- Twelve readout tiles: coolant, intake air, throttle, engine load, boost/vacuum,
-  fuel level, instant consumption, fuel rate, power, torque, gear, battery
-- Warning colours for overheating, low fuel, and low battery voltage
+- Analogue RPM and speed gauges with a redline zone, eased between samples
+- Large gear indicator: `N` in neutral, `1`-`6` in gear, with a SHIFT UP hint for manuals
+- Twelve tiles you choose yourself: **long-press any tile** to pick from ~15 derived
+  values and every PID your car supports
+- Alert banner across the top of every tab
+
+**Head-up display**
+- Tap **HUD** for full-screen speed, gear, and an RPM bar
+- Long-press to mirror it, so a phone lying on the dashboard reflects in the windscreen
+
+**Alerts** (beep, and optional spoken warnings)
+- Speed limit, engine overheating, over-rev, low battery voltage, low fuel,
+  and the check engine light coming on mid-drive
 
 **Sensors**
-- All 67 standard mode 01 PIDs in the registry, filtered to what your ECU
-  actually reports, with live values and units
+- All 69 standard PIDs in the registry, filtered to what your ECU answers
+- **Tap any sensor for a live 60-second graph**
 
 **Trip computer**
-- Distance, duration, moving vs idle time, average and max speed
-- Fuel used, average economy, remaining range
-- Session maxima for RPM, coolant, and power
+- Distance, time moving and idling, average and max speed, fuel used, economy, range
+- Trip cost in rupees and cost per km (set the fuel price in Settings)
+- Eco score, harsh acceleration and braking counts, time at high revs
+- **Trip history**: trips are saved when you tap *Save and new trip*, disconnect,
+  or leave the car parked for 5+ minutes
+- Continues across short Bluetooth dropouts instead of resetting
 
 **Performance timers**
-- 0-60 km/h, 0-100 km/h, 60-100 km/h
-- Quarter mile with trap speed
-- 100-0 km/h braking distance
-- Arms automatically at a standstill, no button press needed
+- 0-60, 0-100, 60-100 km/h, quarter mile with trap speed, 100-0 braking distance
 
 **Diagnostics**
-- Read stored (mode 03), pending (mode 07), and permanent (mode 0A) trouble codes
-- ~195 generic SAE code descriptions built in, with a sensible fallback for
-  manufacturer-specific codes
-- Clear codes and turn off the check engine light, behind a confirmation
-- MIL status and readiness monitors, for emissions test preparation
-- VIN, ECU name, calibration ID, and detected protocol
+- Stored, pending, and permanent trouble codes from every module, not just the engine
+- **Freeze frame**: the conditions the ECU recorded when the fault was stored
+- ~195 generic code descriptions; clear codes behind a confirmation
+- MIL status, readiness monitors, VIN, ECU name, calibration ID
 
 **Console**
-- Raw AT and OBD command prompt, with a live trace of adapter traffic
-- Useful for probing manufacturer PIDs the registry does not cover
+- Raw AT/OBD prompt; live polling traffic is optional so it cannot slow the UI
+
+**Head unit friendly**
+- Optional start on boot
+- Keeps the Bluetooth link while the ignition is off and resumes within about 3 s of
+  starting the car, showing resting battery voltage meanwhile
 
 **Logging**
-- Optional CSV of every sample, written to the app's external files directory
+- Optional CSV of every sample, including gear (0 = neutral) and fuel-cut state
+
+## How the gear indicator works
+
+OBD2 does not report the gear, so the app infers it. In gear, road speed per
+engine rpm is fixed by the gearbox, so each gear shows up as a distinct ratio.
+The app learns those ratios while you drive and **saves them**, so from the
+second drive onward the gear appears as soon as a shift settles.
+
+- **First drive:** use every gear for a few seconds each. Settings shows the
+  learned gears in km/h per 1000 rpm.
+- **Neutral / clutch down** is detected two ways: the ratio is higher than any
+  gear allows, or the engine sits at idle while the ratio keeps changing.
+- **Set transmission and gear count in Settings.** Manual shows `N` when stopped;
+  automatic/AMT shows `-` (it cannot tell D from N); CVT shows `D`.
+- **Relearn gears** in Settings after changing tyre size.
+
+## Faster polling
+
+The adapter is probed at connect time for three speedups, each dropped
+automatically if your adapter or car does not handle it:
+
+1. **Several PIDs per request** (ISO 15765-4 CAN cars)
+2. **Talking only to the engine ECU**, so other modules stay quiet
+3. **Fast return**: the adapter replies the moment the answer arrives instead
+   of waiting out its timeout
+
+RPM and speed are read together every cycle; slower values are spread across
+cycles rather than read in bursts, so the gauges never stall. The Console tab
+shows which speedups are active. If readings ever freeze or go blank, turn off
+**Fast polling** in Settings.
 
 ## Getting an APK
 
@@ -165,18 +206,24 @@ fastest way to see what is actually going wrong.
     +- bluetooth/ObdSocket      RFCOMM transport, with the channel-1 reflection fallback
     +- obd/
     |    ObdResponse            Frame joining, error detection, hex extraction
-    |    Pids                   67-PID registry with decode formulas and poll tiers
+    |    Pids                   69-PID registry with decode formulas and poll tiers
     |    Elm327                 Adapter configuration and the diagnostic modes
     |    Dtc / DtcLibrary       Code decoding, readiness monitors, descriptions
     +- core/
     |    ObdRepository          StateFlow hub between the service and the UI
-    |    Metrics                Fuel rate, boost, power, gear estimation
-    |    TripComputer/PerfTimer Integrators for trip totals and acceleration runs
+    |    PollScheduler          What to read each cycle: fast PIDs plus a capped slice of slow ones
+    |    GearEstimator          Learned, persisted gear ratios with neutral detection
+    |    AlertMonitor           Latched alerts with hysteresis and repeat intervals
+    |    Metrics                Fuel rate (with fuel-cut detection), boost, power, range
+    |    TripComputer/PerfTimer Trip totals, cost, eco score, acceleration runs
+    |    TripHistory, PidHistory Saved trips; recent values for the live graph
     |    CsvLogger, Prefs
     +- service/ObdService       Foreground service owning the connection and poll loop
-    +- ui/                      Connect screen, five dashboard tabs, settings
+    |    AlertSounder, BootReceiver
+    +- ui/                      Connect screen, five tabs, HUD, settings, tile catalogue
          view/GaugeView         Custom arc gauge
          view/TileView          Compact readout tile
+         view/ChartView         Rolling line graph
 
 The service is the only writer to `ObdRepository`. Screens observe its flows and
 send one-off requests (read codes, clear codes, raw command) back through a

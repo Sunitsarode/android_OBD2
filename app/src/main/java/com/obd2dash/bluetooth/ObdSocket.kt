@@ -20,6 +20,7 @@ class ObdSocket(private val device: BluetoothDevice) {
     private var socket: BluetoothSocket? = null
     private var input: InputStream? = null
     private var output: OutputStream? = null
+    private val buffer = ByteArray(512)
 
     val isConnected: Boolean get() = socket?.isConnected == true
 
@@ -72,14 +73,18 @@ class ObdSocket(private val device: BluetoothDevice) {
         val sb = StringBuilder()
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
-            if (inp.available() > 0) {
-                val b = inp.read()
-                if (b < 0) throw IOException("Stream closed")
-                val c = b.toChar()
-                if (c == PROMPT) return sb.toString()
-                if (c.code != 0) sb.append(c)
+            val available = inp.available()
+            if (available > 0) {
+                // Read whatever has arrived in one call; byte-at-a-time reads cost a JNI hop each.
+                val count = inp.read(buffer, 0, minOf(available, buffer.size))
+                if (count < 0) throw IOException("Stream closed")
+                for (i in 0 until count) {
+                    val c = (buffer[i].toInt() and 0xFF).toChar()
+                    if (c == PROMPT) return sb.toString()
+                    if (c.code != 0) sb.append(c)
+                }
             } else {
-                Thread.sleep(2)
+                Thread.sleep(1)
             }
         }
         throw IOException("Timeout waiting for reply to " + command)

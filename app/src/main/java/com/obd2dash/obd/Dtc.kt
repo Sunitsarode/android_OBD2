@@ -49,6 +49,9 @@ object Dtc {
         return out.map { Entry(it, kind) }
     }
 
+    /** Conditions the ECU recorded at the moment it stored [dtc]. */
+    data class FreezeFrame(val dtc: String?, val values: Map<Int, Float>)
+
     data class Monitor(val name: String, val supported: Boolean, val complete: Boolean)
 
     data class Status(

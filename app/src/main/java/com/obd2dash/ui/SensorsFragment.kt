@@ -5,7 +5,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.fragment.app.Fragment
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -19,20 +18,17 @@ import com.obd2dash.obd.Pids
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-/** Every PID this vehicle answers, with its live value. */
-class SensorsFragment : Fragment() {
+/** Every PID this vehicle answers, with its live value. Tap one to graph it. */
+class SensorsFragment : LiveFragment() {
 
     private var binding: FragmentSensorsBinding? = null
     private lateinit var prefs: Prefs
     private var pids: List<Pids.Pid> = emptyList()
     private var readings: Map<Int, Float> = emptyMap()
+    private var chartPid: Pids.Pid? = null
     private val listAdapter = SensorAdapter()
 
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val b = FragmentSensorsBinding.inflate(inflater, container, false)
         binding = b
         return b.root
@@ -43,8 +39,12 @@ class SensorsFragment : Fragment() {
         prefs = Prefs(requireContext())
         b.sensorList.layoutManager = LinearLayoutManager(requireContext())
         b.sensorList.adapter = listAdapter
-        // Values change on every poll; animating each one would only cause flicker.
+        // Values change every poll; animating each change would only flicker.
         b.sensorList.itemAnimator = null
+        b.chart.setOnClickListener {
+            chartPid = null
+            b.chart.visibility = View.GONE
+        }
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -52,18 +52,37 @@ class SensorsFragment : Fragment() {
                     ObdRepository.supportedPids.collectLatest { supported ->
                         pids = Pids.ALL.filter { supported.contains(it.id) }
                         binding?.sensorSummary?.text =
-                            pids.size.toString() + " of " + Pids.ALL.size + " known PIDs supported"
+                            pids.size.toString() + " of " + Pids.ALL.size + " known PIDs supported. Tap one to graph it."
                         listAdapter.refresh()
                     }
                 }
                 launch {
-                    ObdRepository.readings.collectLatest {
-                        readings = it
-                        listAdapter.refresh()
+                    ObdRepository.live.collectLatest {
+                        readings = it.readings
+                        if (isShowing) onShown()
                     }
                 }
             }
         }
+    }
+
+    override fun onShown() {
+        listAdapter.refresh()
+        updateChart()
+    }
+
+    private fun updateChart() {
+        val b = binding ?: return
+        val pid = chartPid ?: return
+        val now = System.currentTimeMillis()
+        val since = now - CHART_WINDOW_MS
+        b.chart.setData(pid.name, pid.unit, ObdRepository.history.series(pid.id, since), since, now)
+    }
+
+    private fun showChart(pid: Pids.Pid) {
+        chartPid = pid
+        binding?.chart?.visibility = View.VISIBLE
+        updateChart()
     }
 
     override fun onDestroyView() {
@@ -85,11 +104,16 @@ class SensorsFragment : Fragment() {
             holder.item.sensorPid.text = "Mode 01 PID " + pid.hex
             holder.item.sensorValue.text = value
             holder.item.sensorUnit.text = unit
+            holder.item.root.setOnClickListener { showChart(pid) }
         }
 
         override fun getItemCount() = pids.size
 
         @SuppressLint("NotifyDataSetChanged")
         fun refresh() = notifyDataSetChanged()
+    }
+
+    private companion object {
+        const val CHART_WINDOW_MS = 60_000L
     }
 }

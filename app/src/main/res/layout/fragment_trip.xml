@@ -10,12 +10,9 @@
         android:orientation="vertical">
 
         <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Trip computer"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:letterSpacing="0.08" />
+            style="@style/SettingSection"
+            android:layout_marginTop="0dp"
+            android:text="Trip computer" />
 
         <GridLayout
             android:id="@+id/tripGrid"
@@ -25,20 +22,14 @@
             android:columnCount="3" />
 
         <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Performance timers"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:letterSpacing="0.08" />
+            style="@style/SettingSection"
+            android:text="Performance timers" />
 
         <TextView
             android:id="@+id/perfHint"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:text="Timing arms itself at a standstill and starts when the car moves. Use private roads only."
             android:textColor="@color/text_secondary"
             android:textSize="11sp" />
 
@@ -60,7 +51,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="@string/reset_trip" />
+                android:text="Save and new trip" />
 
             <Button
                 android:id="@+id/resetPerf"
@@ -70,5 +61,33 @@
                 android:layout_marginStart="8dp"
                 android:text="@string/reset_perf" />
         </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                style="@style/SettingSection"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="0dp"
+                android:text="Recent trips" />
+
+            <Button
+                android:id="@+id/clearHistory"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Clear" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/historyContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
     </LinearLayout>
 </ScrollView>

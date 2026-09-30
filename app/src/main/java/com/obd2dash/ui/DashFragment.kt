@@ -5,90 +5,93 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.GridLayout
-import androidx.fragment.app.Fragment
+import androidx.appcompat.app.AlertDialog
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.obd2dash.R
 import com.obd2dash.core.Metrics
 import com.obd2dash.core.ObdRepository
 import com.obd2dash.core.Prefs
+import com.obd2dash.core.Settings
+import com.obd2dash.core.TripStats
 import com.obd2dash.databinding.FragmentDashBinding
 import com.obd2dash.obd.Pids
 import com.obd2dash.ui.view.TileView
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
-/** Primary driving view: two gauges plus a reflowing grid of readouts. */
-class DashFragment : Fragment() {
+/**
+ * Primary driving view: two gauges, a large gear indicator, and a grid of
+ * tiles. Long-press a tile to choose what it shows.
+ */
+class DashFragment : LiveFragment() {
 
     private var binding: FragmentDashBinding? = null
     private lateinit var prefs: Prefs
+    private var settings: Settings? = null
     private val tiles = ArrayList<TileView>()
+    private var metrics: List<DashMetrics.Metric> = emptyList()
+    private var tileKeys: List<String> = emptyList()
 
-    /** A tile's caption and the function that turns current data into its text. */
-    private class Spec(
-        val label: String,
-        val render: (Map<Int, Float>, ObdRepository.Derived, Boolean) -> Pair<String?, String>
-    )
-
-    private val specs = listOf(
-        Spec("COOLANT") { r, _, imp ->
-            Format.temperature(r[Pids.COOLANT], imp) to Format.temperatureUnit(imp)
-        },
-        Spec("INTAKE AIR") { r, _, imp ->
-            Format.temperature(r[Pids.INTAKE_TEMP], imp) to Format.temperatureUnit(imp)
-        },
-        Spec("THROTTLE") { r, _, _ -> Format.num(r[Pids.THROTTLE], 0) to "%" },
-        Spec("ENGINE LOAD") { r, _, _ -> Format.num(r[Pids.LOAD], 0) to "%" },
-        Spec("BOOST") { _, d, imp -> Format.pressure(d.boostKpa, imp) to Format.pressureUnit(imp) },
-        Spec("FUEL LEVEL") { r, _, _ -> Format.num(r[Pids.FUEL_LEVEL], 0) to "%" },
-        Spec("CONSUMPTION") { _, d, imp ->
-            Format.consumption(d.consumptionL100, imp) to Format.consumptionUnit(imp)
-        },
-        Spec("FUEL RATE") { _, d, imp ->
-            (if (imp) Format.num(d.fuelRateLh?.times(0.219969f), 2) else Format.num(d.fuelRateLh, 2)) to
-                    (if (imp) "gal/h" else "L/h")
-        },
-        Spec("POWER") { _, d, imp -> Format.power(d.powerKw, imp) to Format.powerUnit(imp) },
-        Spec("TORQUE") { _, d, _ -> Format.num(d.torqueNm, 0) to "Nm" },
-        Spec("GEAR") { _, d, _ -> (d.gear?.toString() ?: "--") to "" },
-        Spec("BATTERY") { r, _, _ -> Format.num(r[Pids.MODULE_VOLTAGE], 1) to "V" }
-    )
-
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val b = FragmentDashBinding.inflate(inflater, container, false)
         binding = b
         return b.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        val b = binding ?: return
         prefs = Prefs(requireContext())
-
-        b.gaugeRpm.redline = prefs.redlineRpm.toFloat()
-        if (prefs.imperialUnits) {
-            b.gaugeSpeed.unit = "mph"
-            b.gaugeSpeed.maxValue = 140f
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(ObdRepository.live, ObdRepository.trip) { live, trip -> live to trip }
+                    .collect { (live, trip) -> if (isShowing) render(live, trip) }
+            }
         }
+    }
 
-        buildTiles(b.tileGrid)
-        observe()
+    /** Settings may have changed while another screen was open. */
+    override fun onResume() {
+        super.onResume()
+        applySettings()
+    }
+
+    override fun onShown() = render(ObdRepository.live.value, ObdRepository.trip.value)
+
+    private fun applySettings() {
+        val b = binding ?: return
+        val s = prefs.snapshot()
+        settings = s
+        b.gaugeRpm.redline = s.redlineRpm.toFloat()
+        b.gaugeRpm.maxValue = if (s.redlineRpm > 7000) 10000f else 8000f
+        b.gaugeSpeed.unit = if (s.imperial) "mph" else "km/h"
+        b.gaugeSpeed.maxValue = if (s.imperial) 140f else 200f
+
+        val saved = prefs.dashTiles.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        val keys = if (saved.size == DashMetrics.TILE_COUNT) saved else DashMetrics.DEFAULT_KEYS
+        if (keys != tileKeys) {
+            tileKeys = keys
+            buildTiles(b.tileGrid)
+        }
+        onShown()
     }
 
     private fun buildTiles(grid: GridLayout) {
         grid.removeAllViews()
         tiles.clear()
+        metrics = tileKeys.map { DashMetrics.resolve(it) ?: DashMetrics.resolve(DashMetrics.DEFAULT_KEYS[0])!! }
         val columns = grid.columnCount
         val margin = (4 * resources.displayMetrics.density).toInt()
 
-        specs.forEachIndexed { index, spec ->
+        metrics.forEachIndexed { index, metric ->
             val tile = TileView(requireContext())
-            tile.setLabel(spec.label)
+            tile.setLabel(metric.label)
             tile.setValue(null)
+            tile.setOnLongClickListener {
+                pickMetric(index)
+                true
+            }
             val params = GridLayout.LayoutParams().apply {
                 width = 0
                 height = 0
@@ -101,43 +104,56 @@ class DashFragment : Fragment() {
         }
     }
 
-    private fun observe() {
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                combine(ObdRepository.readings, ObdRepository.derived) { r, d -> r to d }
-                    .collect { (readings, derived) -> render(readings, derived) }
+    private fun pickMetric(index: Int) {
+        val options = DashMetrics.available(ObdRepository.supportedPids.value)
+        AlertDialog.Builder(requireContext())
+            .setTitle("Show in this tile")
+            .setItems(options.map { it.label }.toTypedArray()) { _, which ->
+                val keys = tileKeys.toMutableList()
+                keys[index] = options[which].key
+                prefs.dashTiles = keys.joinToString(",")
+                applySettings()
             }
-        }
+            .setNeutralButton("Reset all tiles") { _, _ ->
+                prefs.dashTiles = ""
+                applySettings()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
-    private fun render(readings: Map<Int, Float>, derived: ObdRepository.Derived) {
+    private fun render(live: ObdRepository.Live, trip: TripStats) {
         val b = binding ?: return
-        val imperial = prefs.imperialUnits
+        val s = settings ?: return
 
-        b.gaugeRpm.setValue(readings[Pids.RPM])
-        val speed = readings[Pids.SPEED]
-        b.gaugeSpeed.setValue(
-            if (speed == null) null else if (imperial) Metrics.kmhToMph(speed) else speed
+        b.gaugeRpm.setValue(live.readings[Pids.RPM])
+        val speed = live.readings[Pids.SPEED]
+        b.gaugeSpeed.setValue(if (speed == null) null else if (s.imperial) Metrics.kmhToMph(speed) else speed)
+
+        b.gearValue.text = live.gear.label
+        b.gearValue.setTextColor(
+            ContextCompat.getColor(
+                requireContext(),
+                when (live.gear.gear) {
+                    null -> R.color.text_secondary
+                    0 -> R.color.amber
+                    else -> R.color.text_primary
+                }
+            )
         )
+        b.shiftHint.visibility = if (live.gear.shiftUp) View.VISIBLE else View.INVISIBLE
 
-        specs.forEachIndexed { index, spec ->
-            val (value, unit) = spec.render(readings, derived, imperial)
-            val tile = tiles.getOrNull(index) ?: return@forEachIndexed
-            tile.setValue(if (value == "--") null else value, unit, warn = isWarning(spec.label, readings))
+        val inputs = DashMetrics.Inputs(live, trip, s)
+        metrics.forEachIndexed { index, metric ->
+            val (value, unit) = metric.render(inputs)
+            tiles.getOrNull(index)?.setValue(value, unit, metric.warn(inputs))
         }
-    }
-
-    /** Highlights the handful of readings worth noticing at a glance. */
-    private fun isWarning(label: String, readings: Map<Int, Float>): Boolean = when (label) {
-        "COOLANT" -> (readings[Pids.COOLANT] ?: 0f) > 105f
-        "FUEL LEVEL" -> (readings[Pids.FUEL_LEVEL] ?: 100f) < 12f
-        "BATTERY" -> (readings[Pids.MODULE_VOLTAGE] ?: 13f) < 11.8f
-        else -> false
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
         binding = null
         tiles.clear()
+        tileKeys = emptyList()
     }
 }

@@ -121,6 +121,14 @@ class GaugeView @JvmOverloads constructor(
         arcPaint.color = colorTrack
         canvas.drawArc(oval, START_ANGLE, SWEEP, false, arcPaint)
 
+        // A faint red band marks the redline zone even when the needle is below it.
+        if (redline > minValue && redline < maxValue) {
+            val start = (redline - minValue) / (maxValue - minValue)
+            arcPaint.color = colorWarn
+            arcPaint.alpha = REDLINE_ZONE_ALPHA
+            canvas.drawArc(oval, START_ANGLE + SWEEP * start, SWEEP * (1f - start), false, arcPaint)
+        }
+
         val fraction =
             if (maxValue > minValue) ((shown - minValue) / (maxValue - minValue)).coerceIn(0f, 1f)
             else 0f
@@ -223,5 +231,6 @@ class GaugeView @JvmOverloads constructor(
         const val SWEEP = 270f
         const val TICK_COUNT = 8
         const val SMOOTHING = 0.22f
+        const val REDLINE_ZONE_ALPHA = 70
     }
 }

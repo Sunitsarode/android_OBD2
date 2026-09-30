@@ -9,9 +9,17 @@
         android:id="@+id/sensorSummary"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:paddingBottom="6dp"
         android:textColor="@color/text_secondary"
-        android:textSize="12sp"
-        android:paddingBottom="6dp" />
+        android:textSize="12sp" />
+
+    <com.obd2dash.ui.view.ChartView
+        android:id="@+id/chart"
+        android:layout_width="match_parent"
+        android:layout_height="170dp"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/bg_card"
+        android:visibility="gone" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/sensorList"

@@ -31,6 +31,7 @@ object Pids {
     private fun word(d: IntArray) = (d[0] * 256 + d[1]).toFloat()
 
     val ALL: List<Pid> = listOf(
+        Pid(0x03, 2, "Fuel system status", "FUEL SYS", "", 0f, 16f, Tier.MEDIUM) { it[0].toFloat() },
         Pid(0x04, 1, "Calculated engine load", "LOAD", "%", 0f, 100f, Tier.MEDIUM, ::pct255),
         Pid(0x05, 1, "Engine coolant temp", "COOLANT", "C", -40f, 130f, Tier.MEDIUM, ::temp),
         Pid(0x06, 1, "Short term fuel trim B1", "STFT B1", "%", -100f, 99f, Tier.MEDIUM, ::trim),
@@ -100,7 +101,10 @@ object Pids {
         Pid(0x67, 3, "Engine coolant temp (alt)", "COOLANT 2", "C", -40f, 215f, Tier.SLOW) { (it[1] - 40).toFloat() },
         Pid(0x6B, 5, "EGR temperature", "EGR TEMP", "C", -40f, 215f, Tier.SLOW) { (it[1] - 40).toFloat() },
         Pid(0x73, 5, "Exhaust pressure", "EXH PRES", "kPa", 0f, 6553f, Tier.SLOW) { (it[1] * 256 + it[2]) * 0.01f },
-        Pid(0x78, 9, "Exhaust gas temp B1", "EGT B1", "C", -40f, 1000f, Tier.SLOW) { (it[1] * 256 + it[2]) / 10f - 40f }
+        Pid(0x78, 9, "Exhaust gas temp B1", "EGT B1", "C", -40f, 1000f, Tier.SLOW) { (it[1] * 256 + it[2]) / 10f - 40f },
+        Pid(0xA6, 4, "Odometer", "ODOMETER", "km", 0f, 9999999f, Tier.SLOW) {
+            ((it[0].toLong() shl 24) or (it[1].toLong() shl 16) or (it[2].toLong() shl 8) or it[3].toLong()) / 10f
+        }
     )
 
     val BY_ID: Map<Int, Pid> = ALL.associateBy { it.id }
@@ -122,6 +126,10 @@ object Pids {
     const val ACTUAL_TORQUE = 0x62
     const val REF_TORQUE = 0x63
     const val RUNTIME = 0x1F
+    const val FUEL_SYSTEM = 0x03
+    const val REL_THROTTLE = 0x45
+    const val REL_PEDAL = 0x5A
+    const val ODOMETER = 0xA6
 
     /**
      * Decodes a "PIDs supported" bitmask (0100, 0120, ...). The MSB of the first

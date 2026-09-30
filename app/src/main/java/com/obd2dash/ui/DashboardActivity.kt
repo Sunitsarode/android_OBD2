@@ -2,6 +2,7 @@ package com.obd2dash.ui
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import android.view.WindowManager
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -59,6 +60,7 @@ class DashboardActivity : AppCompatActivity() {
         }
 
         binding.connStatus.setOnClickListener { showConnectionMenu() }
+        binding.hudButton.setOnClickListener { startActivity(Intent(this, HudActivity::class.java)) }
 
         observe()
     }
@@ -96,6 +98,12 @@ class DashboardActivity : AppCompatActivity() {
                 binding.pollRate.text = if (it > 0f) "%.1f q/s".format(it) else ""
             }
         }
+        lifecycleScope.launch {
+            ObdRepository.alerts.collectLatest { active ->
+                binding.alertBanner.visibility = if (active.isEmpty()) View.GONE else View.VISIBLE
+                binding.alertBanner.text = active.joinToString("   |   ") { it.title.uppercase() }
+            }
+        }
     }
 
     private fun showConnectionMenu() {
@@ -103,6 +111,7 @@ class DashboardActivity : AppCompatActivity() {
         val details = listOfNotNull(
             info.adapterId?.let { "Adapter: " + it },
             info.protocol?.let { "Protocol: " + it },
+            ObdRepository.pollMode.value.takeIf { it.isNotEmpty() }?.let { "Polling: " + it },
             info.vin?.let { "VIN: " + it }
         ).joinToString("\n").ifEmpty { "No adapter details yet" }
 
@@ -113,6 +122,8 @@ class DashboardActivity : AppCompatActivity() {
                 startActivity(Intent(this, SettingsActivity::class.java))
             }
             .setNegativeButton(R.string.disconnect) { _, _ ->
+                // Stops the connect screen from reconnecting straight away.
+                ObdRepository.userDisconnected = true
                 ObdService.disconnect(this)
                 // Back to the picker rather than out of the app entirely.
                 startActivity(Intent(this, ConnectActivity::class.java))

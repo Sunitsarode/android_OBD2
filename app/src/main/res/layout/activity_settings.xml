@@ -18,119 +18,85 @@
             android:textSize="22sp"
             android:textStyle="bold" />
 
+        <TextView style="@style/SettingSection" android:text="Vehicle" />
+
+        <TextView style="@style/SettingLabel" android:text="Fuel type" />
+        <Spinner android:id="@+id/fuelType" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+        <TextView style="@style/SettingLabel" android:text="Engine displacement (litres)" />
+        <EditText android:id="@+id/displacement" style="@style/SettingInput" android:inputType="numberDecimal" />
+
+        <TextView style="@style/SettingLabel" android:text="Fuel tank capacity (litres)" />
+        <EditText android:id="@+id/tankSize" style="@style/SettingInput" android:inputType="numberDecimal" />
+
+        <TextView style="@style/SettingLabel" android:text="Fuel price per litre (for trip cost, 0 = off)" />
+        <EditText android:id="@+id/fuelPrice" style="@style/SettingInput" android:inputType="numberDecimal" />
+
+        <TextView style="@style/SettingLabel" android:text="Tachometer redline (rpm)" />
+        <EditText android:id="@+id/redline" style="@style/SettingInput" android:inputType="number" />
+
+        <TextView style="@style/SettingSection" android:text="Gearbox" />
+
+        <TextView style="@style/SettingLabel" android:text="Transmission" />
+        <Spinner android:id="@+id/transmission" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+        <TextView style="@style/SettingLabel" android:text="Number of forward gears" />
+        <Spinner android:id="@+id/gearCount" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+        <TextView style="@style/SettingLabel" android:text="Shift-up hint above (rpm, 0 = off, manual only)" />
+        <EditText android:id="@+id/shiftUpRpm" style="@style/SettingInput" android:inputType="number" />
+
         <TextView
+            android:id="@+id/learnedGears"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:text="Vehicle"
+            android:layout_marginTop="10dp"
             android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:letterSpacing="0.08" />
+            android:textSize="12sp" />
 
-        <TextView
-            android:layout_width="match_parent"
+        <Button
+            android:id="@+id/resetGears"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="Fuel type"
-            android:textColor="@color/text_primary"
-            android:textSize="14sp" />
+            android:text="Relearn gears" />
 
-        <Spinner
-            android:id="@+id/fuelType"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+        <TextView style="@style/SettingSection" android:text="Alerts" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="Engine displacement (litres)"
-            android:textColor="@color/text_primary"
-            android:textSize="14sp" />
+        <TextView style="@style/SettingLabel" android:text="Speed limit alert (km/h, 0 = off)" />
+        <EditText android:id="@+id/speedLimit" style="@style/SettingInput" android:inputType="number" />
 
-        <EditText
-            android:id="@+id/displacement"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:inputType="numberDecimal"
-            android:textColor="@color/text_primary"
-            android:importantForAutofill="no" />
+        <TextView style="@style/SettingLabel" android:text="Overheat alert (coolant, C)" />
+        <EditText android:id="@+id/overheat" style="@style/SettingInput" android:inputType="number" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="Fuel tank capacity (litres)"
-            android:textColor="@color/text_primary"
-            android:textSize="14sp" />
+        <TextView style="@style/SettingLabel" android:text="Low fuel alert (%, 0 = off)" />
+        <EditText android:id="@+id/lowFuel" style="@style/SettingInput" android:inputType="number" />
 
-        <EditText
-            android:id="@+id/tankSize"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:inputType="numberDecimal"
-            android:textColor="@color/text_primary"
-            android:importantForAutofill="no" />
+        <CheckBox android:id="@+id/alertBeep" style="@style/SettingCheck" android:text="Beep on alerts" />
+        <CheckBox android:id="@+id/alertVoice" style="@style/SettingCheck" android:text="Speak alerts (text-to-speech)" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="Tachometer redline (rpm)"
-            android:textColor="@color/text_primary"
-            android:textSize="14sp" />
+        <TextView style="@style/SettingSection" android:text="Display and connection" />
 
-        <EditText
-            android:id="@+id/redline"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:inputType="number"
-            android:textColor="@color/text_primary"
-            android:importantForAutofill="no" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:text="Display and logging"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:letterSpacing="0.08" />
-
-        <CheckBox
-            android:id="@+id/imperial"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="Imperial units (mph, F, psi, mpg)"
-            android:textColor="@color/text_primary" />
-
-        <CheckBox
-            android:id="@+id/keepScreenOn"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Keep screen on while connected"
-            android:textColor="@color/text_primary" />
-
-        <CheckBox
-            android:id="@+id/autoConnect"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Reconnect to last adapter on launch"
-            android:textColor="@color/text_primary" />
-
-        <CheckBox
-            android:id="@+id/logging"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Log every sample to CSV"
-            android:textColor="@color/text_primary" />
+        <CheckBox android:id="@+id/imperial" style="@style/SettingCheck" android:text="Imperial units (mph, F, psi, mpg)" />
+        <CheckBox android:id="@+id/keepScreenOn" style="@style/SettingCheck" android:text="Keep screen on while connected" />
+        <CheckBox android:id="@+id/autoConnect" style="@style/SettingCheck" android:text="Reconnect to last adapter on launch" />
+        <CheckBox android:id="@+id/startOnBoot" style="@style/SettingCheck" android:text="Start when the head unit boots" />
+        <CheckBox android:id="@+id/fastPolling" style="@style/SettingCheck" android:text="Fast polling (turn off if readings freeze or go blank)" />
+        <CheckBox android:id="@+id/logging" style="@style/SettingCheck" android:text="Log every sample to CSV" />
 
         <TextView
             android:id="@+id/logPath"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/reconnectNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Fast polling and logging changes apply on the next connection."
             android:textColor="@color/text_secondary"
             android:textSize="11sp" />
 

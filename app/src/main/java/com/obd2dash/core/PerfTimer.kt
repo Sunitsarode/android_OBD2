@@ -18,6 +18,7 @@ class PerfTimer {
 
     private var t60: Float? = null
     private var t100: Float? = null
+    private var quarterDone = false
 
     private var brakingFromMs = 0L
     private var brakingDistanceM = 0f
@@ -55,6 +56,7 @@ class PerfTimer {
             runDistanceM = 0f
             t60 = null
             t100 = null
+            quarterDone = false
         }
 
         if (running) {
@@ -64,11 +66,13 @@ class PerfTimer {
             if (t60 == null && speed >= 60f) t60 = elapsed
             if (t100 == null && speed >= 100f) t100 = elapsed
 
-            if (results.quarterMileSeconds == null && runDistanceM >= QUARTER_MILE_METRES) {
-                results = results.copy(
-                    quarterMileSeconds = elapsed,
-                    quarterMileTrapKmh = speed
-                )
+            // Keep the best quarter mile, as with the other benchmarks, not just the first.
+            if (!quarterDone && runDistanceM >= QUARTER_MILE_METRES) {
+                quarterDone = true
+                val best = results.quarterMileSeconds
+                if (best == null || elapsed < best) {
+                    results = results.copy(quarterMileSeconds = elapsed, quarterMileTrapKmh = speed)
+                }
             }
             results = results.copy(running = true, currentRunSeconds = elapsed)
             publishBest()
