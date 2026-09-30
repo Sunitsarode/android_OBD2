@@ -68,7 +68,7 @@ object Format {
     const val RUPEE = "₹"
 
     /** Money without clutter: paise under 100, whole rupees above. */
-    fun money(v: Float?): String = when (pid.unit) {
+    fun money(v: Float?): String = when {
         v == null -> "--"
         v < 100f -> RUPEE + "%.2f".format(v)
         else -> RUPEE + "%.0f".format(v)

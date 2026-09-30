@@ -120,6 +120,7 @@ object ObdRepository {
 
     // --- console: a bounded ring buffer the console screen polls, never a flow ---
 
+    private const val CONSOLE_LIMIT = 400
     private val consoleLock = Any()
     private val consoleLines = ArrayDeque<String>(CONSOLE_LIMIT)
     private val consoleCounter = AtomicLong()
@@ -209,6 +210,4 @@ object ObdRepository {
         _alerts.value = emptySet()
         _pollRateHz.value = 0f
     }
-
-    private const val CONSOLE_LIMIT = 400
 }
