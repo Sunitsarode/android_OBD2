@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId "com.obd2dash"
-        minSdk 21
+        minSdk 23
         targetSdk 34
         versionCode 1
         versionName "1.0"
@@ -44,4 +44,7 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    // Android Auto projection
+    implementation 'androidx.car.app:app:1.4.0'
 }

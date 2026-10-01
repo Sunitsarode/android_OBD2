@@ -4,7 +4,7 @@ A real-time OBD2 dashboard for Android, talking to a Bluetooth ELM327 adapter.
 Built to run both on a phone and sideloaded onto a car's Android head unit.
 
 - **Language:** Kotlin, classic Views with custom `Canvas` gauges
-- **minSdk 21** (Android 5.0) so older head units are supported
+- **minSdk 23** (Android 6.0); Android Auto needs Android 8+ on the phone
 - **No network access** - the app has no internet permission and sends nothing anywhere
 
 ## Features
@@ -85,6 +85,35 @@ RPM and speed are read together every cycle; slower values are spread across
 cycles rather than read in bursts, so the gauges never stall. The Console tab
 shows which speedups are active. If readings ever freeze or go blank, turn off
 **Fast polling** in Settings.
+
+## Android Auto
+
+The dashboard also shows on the car's own screen through Android Auto. The phone
+keeps doing the OBD work over Bluetooth; Android Auto projects the result.
+
+**On the car screen:** RPM and speed dials, a large gear indicator with the
+shift-up hint, four tiles (the first four you chose on the phone), and the alert
+banner. Icons in the top corner open **Sensors**, **Trip** and **Trouble codes**
+lists. Clearing codes is deliberately left to the phone.
+
+### One-time setup
+
+Android Auto only lists apps from the Play Store unless you allow unknown sources:
+
+1. On the phone, open **Settings > Connected devices > Connection preferences > Android Auto**
+   (or search Settings for "Android Auto").
+2. Scroll to the bottom and tap **Version** about 10 times, then confirm to enable developer mode.
+3. Open the three-dot menu > **Developer settings** and turn on **Unknown sources**.
+4. Open OBD2 Dashboard on the phone once, grant Bluetooth, and connect to the adapter.
+5. Connect the phone to the car. If the app is not on the Android Auto launcher,
+   use **Customize launcher** in the Android Auto settings to show it.
+
+The app registers as a *navigation* app, because that is the only kind Android
+Auto lets draw its own graphics. It never starts turn-by-turn guidance, so Google
+Maps keeps navigating alongside it.
+
+**Car shows "Not connected"?** Tap **Connect** on the car screen. If Android
+refuses to start the connection from the car, open the app on the phone once.
 
 ## Getting an APK
 
@@ -220,6 +249,7 @@ fastest way to see what is actually going wrong.
     |    CsvLogger, Prefs
     +- service/ObdService       Foreground service owning the connection and poll loop
     |    AlertSounder, BootReceiver
+    +- auto/                    Android Auto: car app service, drawn dashboard, list screens
     +- ui/                      Connect screen, five tabs, HUD, settings, tile catalogue
          view/GaugeView         Custom arc gauge
          view/TileView          Compact readout tile
