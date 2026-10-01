@@ -24,6 +24,8 @@ output-metadata.json
 # Keystore files
 *.jks
 *.keystore
+# The shared signing key is committed on purpose (see app/build.gradle).
+!app/signing/obd2dash.keystore
 
 # Android Profiling
 *.hprof

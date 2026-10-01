@@ -136,6 +136,12 @@ Push this repo to GitHub. `.github/workflows/build.yml` builds both debug and
 release APKs on every push and attaches them to the workflow run as artifacts.
 Download from the **Actions** tab.
 
+Every build is signed with the same key (`app/signing/obd2dash.keystore`, committed
+on purpose), so a new APK installs over the old one and keeps your settings,
+learned gears and trip history. The version number is the CI run number, shown in
+the phone's app info. The key is public: it gives update continuity, not proof
+of who built an APK, so only install APKs from this repo's own Actions runs.
+
 ### Option C - local command line
 
 Needs JDK 17 and the Android SDK installed, then:

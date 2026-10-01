@@ -60,6 +60,13 @@ jobs:
         continue-on-error: true
         run: gradle assembleRelease --no-daemon --stacktrace
 
+      - name: Report signing certificate
+        if: success()
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          DIGEST=$("$ANDROID_SDK_ROOT/build-tools/34.0.0/apksigner" verify --print-certs "$APK" | grep -m1 "SHA-256 digest" | sed 's/.*: //')
+          echo "::notice::APK signing certificate SHA-256: $DIGEST"
+
       - name: Upload APKs
         if: always()
         uses: actions/upload-artifact@v4

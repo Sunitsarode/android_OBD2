@@ -11,18 +11,34 @@ android {
         applicationId "com.obd2dash"
         minSdk 23
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        // CI builds number themselves, so each APK is a newer version than the last.
+        def run = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+        versionCode run
+        versionName "1.0." + run
         vectorDrawables.useSupportLibrary true
     }
 
+    signingConfigs {
+        // Committed on purpose. Every build machine, including each fresh CI runner,
+        // signs with this same key, so a new APK installs over the old one and keeps
+        // settings, learned gears and trip history. The key is public, so it only
+        // provides update continuity, not proof of who built the APK.
+        shared {
+            storeFile file('signing/obd2dash.keystore')
+            storePassword 'obd2dash'
+            keyAlias 'obd2dash'
+            keyPassword 'obd2dash'
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.shared
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            // Signed with the debug key so `assembleRelease` produces an installable APK
-            // without extra setup. Replace with a real keystore before distributing.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.shared
         }
     }
 
