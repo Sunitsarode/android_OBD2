@@ -49,7 +49,7 @@ class AlertMonitor {
         val speed = r[Pids.SPEED]
         val rpm = r[Pids.RPM]
         val coolant = r[Pids.COOLANT]
-        val fuel = r[Pids.FUEL_LEVEL]
+        val fuelLevel = r[Pids.FUEL_LEVEL]
         val volts = live.batteryVolts
         val engineRunning = (rpm ?: 0f) > 400f
 
@@ -59,8 +59,8 @@ class AlertMonitor {
             on = (coolant ?: 0f) >= s.overheatC, off = (coolant ?: 0f) < s.overheatC - 3)
         latch(Alert.OVER_REV, s.redlineRpm > 0 && rpm != null,
             on = (rpm ?: 0f) >= s.redlineRpm, off = (rpm ?: 0f) < s.redlineRpm - 250)
-        latch(Alert.LOW_FUEL, s.lowFuelPercent > 0 && fuel != null,
-            on = (fuel ?: 100f) < s.lowFuelPercent, off = (fuel ?: 0f) > s.lowFuelPercent + 3)
+        latch(Alert.LOW_FUEL, s.lowFuelPercent > 0 && fuelLevel != null,
+            on = (fuelLevel ?: 100f) < s.lowFuelPercent, off = (fuelLevel ?: 0f) > s.lowFuelPercent + 3)
 
         // Voltage dips while cranking and sags briefly under load, so it must stay low
         // for a while before it counts. With the engine off, resting voltage is normal.
@@ -77,11 +77,11 @@ class AlertMonitor {
         // A bi-fuel car drops to petrol by itself when the cylinder runs dry, which is
         // easy to miss and costs more per km. Only automatic detection can see it happen;
         // in manual mode the driver made the switch.
-        val fuel = live.derived.fuel
-        if (lastFuel == Fuel.CNG && fuel == Fuel.PETROL && live.derived.fuelFromEcu && (speed ?: 0f) > 5f) {
+        val fuelInUse = live.derived.fuel
+        if (lastFuel == Fuel.CNG && fuelInUse == Fuel.PETROL && live.derived.fuelFromEcu && (speed ?: 0f) > 5f) {
             switchedToPetrolAt = now
         }
-        lastFuel = fuel
+        lastFuel = fuelInUse
         val recentlySwitched = switchedToPetrolAt != 0L && now - switchedToPetrolAt < SWITCH_NOTICE_MS
         latch(Alert.SWITCHED_TO_PETROL, s.fuelSystem.usesCng, on = recentlySwitched, off = !recentlySwitched)
 

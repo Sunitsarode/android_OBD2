@@ -72,6 +72,7 @@ class ObdService : Service() {
 
     private lateinit var gears: GearEstimator
     private lateinit var sounder: AlertSounder
+    private lateinit var notifier: CarAlertNotifier
     private lateinit var tripHistory: TripHistory
     private lateinit var cng: CngTracker
     private val tripLock = Any()
@@ -100,6 +101,7 @@ class ObdService : Service() {
         settingsRef.set(prefs.snapshot())
         gears = GearEstimator(PrefsGearStore(prefs))
         sounder = AlertSounder(this)
+        notifier = CarAlertNotifier(this)
         tripHistory = TripHistory(this)
         cng = CngTracker(prefs)
         applySettings()
@@ -153,7 +155,7 @@ class ObdService : Service() {
         logger?.stop()
         logger = null
         releaseWakeLock()
-        ObdRepository.clearLiveData()
+        clearLive()
         ObdRepository.setState(ConnState.DISCONNECTED, "Disconnected")
     }
 
@@ -204,7 +206,7 @@ class ObdService : Service() {
                 logger?.stop()
                 logger = null
                 socket?.close()
-                ObdRepository.clearLiveData()
+                clearLive()
             }
 
             attempt++
@@ -242,7 +244,7 @@ class ObdService : Service() {
                 pollLoop(elm, pollable, dropped)
             } catch (lost: EcuLostException) {
                 ObdRepository.trace("-- " + lost.message)
-                ObdRepository.clearLiveData()
+                clearLive()
                 waitForEcu(elm)
                 // Modules can wake in a different state, so probe the speedups again.
                 elm.configureFastMode(settings.fastPolling, advertised, fastIds)
@@ -441,8 +443,15 @@ class ObdService : Service() {
         val snapshot = ObdRepository.Live(readings, derived, lastGear, now)
 
         val alertResult = alerts.evaluate(snapshot, milOn, tripStats, s, now)
-        alertResult.fired.forEach { sounder.play(it, s.alertBeep, s.alertVoice) }
-        if (alertResult.changed) ObdRepository.publishAlerts(alertResult.active)
+        alertResult.fired.forEach {
+            sounder.play(it, s.alertBeep, s.alertVoice)
+            // Pops up over Google Maps or any other app when no dashboard is on screen.
+            notifier.post(it, snapshot, tripStats, s)
+        }
+        if (alertResult.changed) {
+            ObdRepository.publishAlerts(alertResult.active)
+            notifier.retain(alertResult.active)
+        }
 
         ObdRepository.publishLive(snapshot)
         ObdRepository.publishTrip(tripStats)
@@ -516,6 +525,12 @@ class ObdService : Service() {
                 adapterId = elm.adapterId
             )
         )
+    }
+
+    /** Blanks live data and withdraws alert pop-ups, so nothing stale is left showing. */
+    private fun clearLive() {
+        ObdRepository.clearLiveData()
+        notifier.cancelAll()
     }
 
     private fun bluetoothAdapter(): BluetoothAdapter? =

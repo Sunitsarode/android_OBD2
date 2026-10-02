@@ -57,6 +57,8 @@ class GaugeView @JvmOverloads constructor(
     }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
+        // Tabular figures keep changing digits from shifting sideways.
+        fontFeatureSettings = "tnum"
     }
     private val needlePaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
@@ -198,7 +200,8 @@ class GaugeView @JvmOverloads constructor(
         textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         textPaint.color = if (hasValue) colorText else colorMuted
         textPaint.textSize = size * 0.20f
-        canvas.drawText(if (hasValue) formatValue(shown) else "--", cx, cy + size * 0.30f, textPaint)
+        // The needle eases toward the target, but the digits show the real value at once.
+        canvas.drawText(if (hasValue) formatValue(target) else "--", cx, cy + size * 0.30f, textPaint)
 
         textPaint.typeface = Typeface.DEFAULT
         textPaint.color = colorMuted

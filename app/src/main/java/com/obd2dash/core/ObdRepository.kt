@@ -123,6 +123,17 @@ object ObdRepository {
     @Volatile
     var verboseTrace = false
 
+    /**
+     * Whether the Android Auto dashboard is on the car screen. While it is, alerts
+     * show in its banner; otherwise they pop up over whatever app is in front.
+     */
+    @Volatile
+    var carScreenVisible = false
+
+    /** Whether the phone dashboard is on screen, for the same reason. */
+    @Volatile
+    var phoneDashboardVisible = false
+
     // --- console: a bounded ring buffer the console screen polls, never a flow ---
 
     private const val CONSOLE_LIMIT = 400

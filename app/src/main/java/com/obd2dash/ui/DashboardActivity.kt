@@ -70,6 +70,16 @@ class DashboardActivity : AppCompatActivity() {
         outState.putInt(STATE_ACTIVE, activeId)
     }
 
+    override fun onStart() {
+        super.onStart()
+        ObdRepository.phoneDashboardVisible = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        ObdRepository.phoneDashboardVisible = false
+    }
+
     override fun onResume() {
         super.onResume()
         if (prefs.keepScreenOn) {

@@ -119,10 +119,35 @@ shows which speedups are active. If readings ever freeze or go blank, turn off
 The dashboard also shows on the car's own screen through Android Auto. The phone
 keeps doing the OBD work over Bluetooth; Android Auto projects the result.
 
-**On the car screen:** RPM and speed dials, a large gear indicator with the
-shift-up hint, four tiles (the first four you chose on the phone), and the alert
-banner. Icons in the top corner open **Sensors**, **Trip** and **Trouble codes**
-lists. Clearing codes is deliberately left to the phone.
+**On the car screen:** a digital cluster - road speed in large digits inside an
+RPM ring (amber at the shift-up point, red past the redline), the gear in a chip
+below it, and the fuel in use on bi-fuel cars. Next to it are four info cards (the
+first four tiles you chose on the phone, minus gear and fuel). The layout follows
+the screen: side by side on wide screens, stacked on narrow ones, and the cluster
+alone if Android Auto shows the app in a small split-screen card. A red or amber
+banner carries any active alerts. Icons in the corner open **Sensors**, **Trip**
+and **Trouble codes**. Clearing codes is deliberately left to the phone.
+
+### Using it with Google Maps and music
+
+Android Auto shows **one app at a time** on the car screen. No third-party app can
+draw next to Google Maps' map, so switch between them from the app bar. The app is
+built to cause as little friction as possible:
+
+- **Maps keeps navigating.** The app never starts guidance, so a route in Google
+  Maps continues, with voice prompts, while the dashboard is on screen.
+- **Alerts reach you over Maps.** When the dashboard is not in front, overheating,
+  speed limit, low CNG and other alerts pop up as notifications on the car screen,
+  on top of Google Maps or your music app. They clear when the condition does.
+  (Turn this off under the phone's notification settings, channel *Driver alerts*.)
+- **Alert sounds duck your music.** Beeps and spoken alerts take audio focus the
+  way Maps' own prompts do, so music dips briefly instead of playing over them.
+- **"Navigate to..." always goes to Maps.** The app has to register as a navigation
+  app to draw its own dashboard. If Android Auto ever sends it a voice navigation
+  request, it says so and points you back to Google Maps rather than silently
+  doing nothing.
+- **Light on the phone.** The dashboard redraws only when data changes, leaving
+  CPU and battery for Maps and the Android Auto projection.
 
 ### One-time setup
 

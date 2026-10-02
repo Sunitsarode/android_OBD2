@@ -9,6 +9,7 @@ import androidx.car.app.CarAppService
 import androidx.car.app.CarContext
 import androidx.car.app.CarToast
 import androidx.car.app.Screen
+import androidx.car.app.ScreenManager
 import androidx.car.app.Session
 import androidx.car.app.validation.HostValidator
 import androidx.core.content.ContextCompat
@@ -40,8 +41,24 @@ class ObdCarSession : Session() {
 
     override fun onCreateScreen(intent: Intent): Screen {
         CarConnection.connectIfIdle(carContext, quiet = true)
+        if (isNavigationRequest(intent)) {
+            // The dashboard goes underneath, so Back from the explanation lands on it.
+            carContext.getCarService(ScreenManager::class.java).push(DashboardScreen(carContext))
+            return NavigationHandoffScreen(carContext)
+        }
         return DashboardScreen(carContext)
     }
+
+    override fun onNewIntent(intent: Intent) {
+        val screens = carContext.getCarService(ScreenManager::class.java)
+        if (isNavigationRequest(intent)) {
+            if (screens.top !is NavigationHandoffScreen) screens.push(NavigationHandoffScreen(carContext))
+        } else {
+            screens.popToRoot()
+        }
+    }
+
+    private fun isNavigationRequest(intent: Intent) = intent.action == CarContext.ACTION_NAVIGATE
 }
 
 /** Starts the phone-side OBD connection from the car screen. */

@@ -17,6 +17,7 @@ import androidx.car.app.model.Template
 import androidx.car.app.navigation.model.NavigationTemplate
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.obd2dash.R
@@ -53,14 +54,29 @@ class DashboardScreen(carContext: CarContext) : Screen(carContext), SurfaceCallb
     @Volatile
     private var stableArea: Rect? = null
 
+    /** Set when the surface or its usable area changes, forcing a repaint even with no new data. */
+    @Volatile
+    private var surfaceDirty = true
+
     private var settings: Settings? = null
     private var tiles: List<DashMetrics.Metric> = emptyList()
+    private var tileKeys: List<String> = emptyList()
     private var settingsReadAt = 0L
     private var offeredConnect = false
     private var offeredFuel: Pair<Fuel, Boolean>? = null
 
     init {
         carContext.getCarService(AppManager::class.java).setSurfaceCallback(this)
+
+        // While this screen is showing, alerts appear in its banner; once the driver
+        // switches to Google Maps or another app, they pop up as notifications instead.
+        lifecycle.addObserver(LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> ObdRepository.carScreenVisible = true
+                Lifecycle.Event.ON_STOP -> ObdRepository.carScreenVisible = false
+                else -> Unit
+            }
+        })
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -77,10 +93,19 @@ class DashboardScreen(carContext: CarContext) : Screen(carContext), SurfaceCallb
                         .distinctUntilChanged()
                         .collect { if (it != offeredFuel) invalidate() }
                 }
+                // Redraws only when something visible changed or the ring is still easing.
+                // Drawing an unchanged dashboard 12 times a second would burn phone battery
+                // and CPU that Google Maps and the Android Auto projection also need.
                 withContext(Dispatchers.Default) {
+                    surfaceDirty = true
+                    var drawn: CarDashRenderer.Frame? = null
                     while (isActive) {
-                        drawFrame()
-                        delay(FRAME_INTERVAL_MS)
+                        val frame = frame()
+                        if (surfaceDirty || renderer.animating || frame.differsFrom(drawn)) {
+                            surfaceDirty = false
+                            if (drawFrame(frame)) drawn = frame else surfaceDirty = true
+                        }
+                        delay(if (renderer.animating) ANIMATION_FRAME_MS else IDLE_CHECK_MS)
                     }
                 }
             }
@@ -134,14 +159,17 @@ class DashboardScreen(carContext: CarContext) : Screen(carContext), SurfaceCallb
 
     override fun onSurfaceAvailable(surfaceContainer: SurfaceContainer) {
         synchronized(surfaceLock) { container = surfaceContainer }
+        surfaceDirty = true
     }
 
     override fun onVisibleAreaChanged(visibleArea: Rect) {
         this.visibleArea = Rect(visibleArea)
+        surfaceDirty = true
     }
 
     override fun onStableAreaChanged(stableArea: Rect) {
         this.stableArea = Rect(stableArea)
+        surfaceDirty = true
     }
 
     override fun onSurfaceDestroyed(surfaceContainer: SurfaceContainer) {
@@ -150,15 +178,15 @@ class DashboardScreen(carContext: CarContext) : Screen(carContext), SurfaceCallb
         synchronized(surfaceLock) { container = null }
     }
 
-    private fun drawFrame() {
-        val frame = frame()
+    /** Returns false if there was no surface to draw on yet. */
+    private fun drawFrame(frame: CarDashRenderer.Frame): Boolean {
         synchronized(surfaceLock) {
-            val c = container ?: return
-            val surface = c.surface ?: return
-            if (!surface.isValid) return
+            val c = container ?: return false
+            val surface = c.surface ?: return false
+            if (!surface.isValid) return false
             // The stable area stays clear of the action strip even when it expands.
             val area = (stableArea ?: visibleArea)?.takeIf { !it.isEmpty } ?: Rect(0, 0, c.width, c.height)
-            val canvas = lockCanvas(surface) ?: return
+            val canvas = lockCanvas(surface) ?: return false
             try {
                 renderer.draw(canvas, area, c.dpi, frame)
             } finally {
@@ -167,6 +195,7 @@ class DashboardScreen(carContext: CarContext) : Screen(carContext), SurfaceCallb
                 } catch (_: Exception) {
                 }
             }
+            return true
         }
     }
 
@@ -184,29 +213,42 @@ class DashboardScreen(carContext: CarContext) : Screen(carContext), SurfaceCallb
             settingsReadAt = now
             prefs.snapshot().also {
                 settings = it
-                tiles = carTiles(it)
+                updateTiles(it)
             }
         } else current
+        val live = ObdRepository.live.value
         return CarDashRenderer.Frame(
-            live = ObdRepository.live.value,
+            live = live,
             trip = ObdRepository.trip.value,
             alerts = ObdRepository.alerts.value,
             state = ObdRepository.connectionState.value,
             status = ObdRepository.statusMessage.value,
             settings = s,
-            tiles = tiles
+            tiles = tiles,
+            stale = live.at != 0L && System.currentTimeMillis() - live.at > STALE_MS
         )
     }
 
-    /** The first tiles chosen on the phone's dashboard, so both screens agree. */
-    private fun carTiles(s: Settings): List<DashMetrics.Metric> {
+    /**
+     * The first tiles chosen on the phone's dashboard, so both screens agree.
+     * Gear and fuel already sit in the cluster, so they are skipped here.
+     * Rebuilt only when the choice changes, keeping the list identity stable.
+     */
+    private fun updateTiles(s: Settings) {
         val saved = prefs.dashTiles.split(',').map { it.trim() }.filter { it.isNotEmpty() }
-        val keys = if (saved.size == DashMetrics.TILE_COUNT) saved else DashMetrics.defaultKeys(s)
-        return keys.take(CAR_TILE_COUNT).mapNotNull { DashMetrics.resolve(it) }
+        val keys = (if (saved.size == DashMetrics.TILE_COUNT) saved else DashMetrics.defaultKeys(s))
+            .filter { it !in CLUSTER_KEYS }
+            .take(CAR_TILE_COUNT)
+        if (keys == tileKeys) return
+        tileKeys = keys
+        tiles = keys.mapNotNull { DashMetrics.resolve(it) }
     }
 
     private companion object {
-        const val FRAME_INTERVAL_MS = 80L
+        const val ANIMATION_FRAME_MS = 40L
+        const val IDLE_CHECK_MS = 100L
+        const val STALE_MS = 3_000L
+        val CLUSTER_KEYS = setOf("gear", "fuel")
         const val SETTINGS_REFRESH_MS = 1000L
         const val CAR_TILE_COUNT = 4
     }
