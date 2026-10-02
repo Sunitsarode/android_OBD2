@@ -18,19 +18,77 @@
             android:textSize="22sp"
             android:textStyle="bold" />
 
-        <TextView style="@style/SettingSection" android:text="Vehicle" />
+        <TextView style="@style/SettingSection" android:text="Vehicle and fuel" />
 
-        <TextView style="@style/SettingLabel" android:text="Fuel type" />
-        <Spinner android:id="@+id/fuelType" android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <TextView style="@style/SettingLabel" android:text="Fuel system" />
+        <Spinner android:id="@+id/fuelSystem" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+        <LinearLayout
+            android:id="@+id/biFuelGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView style="@style/SettingLabel" android:text="Detect which fuel is in use" />
+            <Spinner android:id="@+id/fuelDetection" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+            <TextView
+                android:id="@+id/ecuFuelReport"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+        </LinearLayout>
 
         <TextView style="@style/SettingLabel" android:text="Engine displacement (litres)" />
         <EditText android:id="@+id/displacement" style="@style/SettingInput" android:inputType="numberDecimal" />
 
-        <TextView style="@style/SettingLabel" android:text="Fuel tank capacity (litres)" />
+        <TextView android:id="@+id/tankLabel" style="@style/SettingLabel" android:text="Petrol tank capacity (litres)" />
         <EditText android:id="@+id/tankSize" style="@style/SettingInput" android:inputType="numberDecimal" />
 
-        <TextView style="@style/SettingLabel" android:text="Fuel price per litre (for trip cost, 0 = off)" />
+        <TextView android:id="@+id/priceLabel" style="@style/SettingLabel" android:text="Petrol price per litre (0 = off)" />
         <EditText android:id="@+id/fuelPrice" style="@style/SettingInput" android:inputType="numberDecimal" />
+
+        <LinearLayout
+            android:id="@+id/cngGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView style="@style/SettingSection" android:text="CNG" />
+
+            <TextView style="@style/SettingLabel" android:text="CNG price per kg (0 = off)" />
+            <EditText android:id="@+id/cngPrice" style="@style/SettingInput" android:inputType="numberDecimal" />
+
+            <TextView style="@style/SettingLabel" android:text="CNG cylinder capacity (kg)" />
+            <EditText android:id="@+id/cngCapacity" style="@style/SettingInput" android:inputType="numberDecimal" />
+
+            <TextView style="@style/SettingLabel" android:text="Low CNG alert below (kg, 0 = off)" />
+            <EditText android:id="@+id/lowCng" style="@style/SettingInput" android:inputType="numberDecimal" />
+
+            <TextView style="@style/SettingLabel" android:text="Cylinder hydro-test due (DD-MM-YYYY, blank = off)" />
+            <EditText android:id="@+id/cylinderTest" style="@style/SettingInput" android:hint="e.g. 15-03-2028" android:inputType="text" />
+
+            <TextView
+                android:id="@+id/cngNote"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="OBD has no CNG gauge, so CNG left is counted down from your last fill-up. Log fill-ups on the Trip tab. The cylinder test is due every 3 years; the date is on the cylinder or its test certificate."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/lpgGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView style="@style/SettingLabel" android:text="LPG price per litre (0 = off)" />
+            <EditText android:id="@+id/lpgPrice" style="@style/SettingInput" android:inputType="numberDecimal" />
+        </LinearLayout>
 
         <TextView style="@style/SettingLabel" android:text="Tachometer redline (rpm)" />
         <EditText android:id="@+id/redline" style="@style/SettingInput" android:inputType="number" />
@@ -75,6 +133,9 @@
         <CheckBox android:id="@+id/alertVoice" style="@style/SettingCheck" android:text="Speak alerts (text-to-speech)" />
 
         <TextView style="@style/SettingSection" android:text="Display and connection" />
+
+        <TextView style="@style/SettingLabel" android:text="Show fuel economy as" />
+        <Spinner android:id="@+id/economyUnit" android:layout_width="match_parent" android:layout_height="wrap_content" />
 
         <CheckBox android:id="@+id/imperial" style="@style/SettingCheck" android:text="Imperial units (mph, F, psi, mpg)" />
         <CheckBox android:id="@+id/keepScreenOn" style="@style/SettingCheck" android:text="Keep screen on while connected" />

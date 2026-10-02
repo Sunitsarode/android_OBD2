@@ -21,6 +21,14 @@
             android:layout_marginTop="6dp"
             android:columnCount="3" />
 
+        <Button
+            android:id="@+id/fillCng"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Log CNG fill-up"
+            android:visibility="gone" />
+
         <TextView
             style="@style/SettingSection"
             android:text="Performance timers" />

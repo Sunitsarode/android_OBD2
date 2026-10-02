@@ -78,7 +78,9 @@ class HudActivity : AppCompatActivity() {
         val rpm = live.readings[Pids.RPM]
 
         binding.hudSpeed.text = if (speed == null) "--" else "%.0f".format(if (imperial) Metrics.kmhToMph(speed) else speed)
-        binding.hudUnit.text = if (imperial) "mph" else "km/h"
+        val unit = if (imperial) "mph" else "km/h"
+        // On a bi-fuel car the fuel in use sits beside the unit, where the eye already goes.
+        binding.hudUnit.text = if (prefs.fuelSystem.isBiFuel) unit + "   " + live.derived.fuel.label.uppercase() else unit
         binding.hudGear.text = if (live.gear.shiftUp) live.gear.label + "↑" else live.gear.label
 
         binding.hudRpm.max = maxOf(redline + 1000, 4000)

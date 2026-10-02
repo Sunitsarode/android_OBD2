@@ -19,7 +19,11 @@ import androidx.core.app.ServiceCompat
 import com.obd2dash.R
 import com.obd2dash.bluetooth.ObdSocket
 import com.obd2dash.core.AlertMonitor
+import com.obd2dash.core.CngTracker
 import com.obd2dash.core.CsvLogger
+import com.obd2dash.core.Fuel
+import com.obd2dash.core.FuelDetection
+import com.obd2dash.core.FuelSelector
 import com.obd2dash.core.GearEstimator
 import com.obd2dash.core.GearReading
 import com.obd2dash.core.Metrics
@@ -69,6 +73,7 @@ class ObdService : Service() {
     private lateinit var gears: GearEstimator
     private lateinit var sounder: AlertSounder
     private lateinit var tripHistory: TripHistory
+    private lateinit var cng: CngTracker
     private val tripLock = Any()
     private val trip = TripComputer()
     private val perf = PerfTimer()
@@ -96,6 +101,7 @@ class ObdService : Service() {
         gears = GearEstimator(PrefsGearStore(prefs))
         sounder = AlertSounder(this)
         tripHistory = TripHistory(this)
+        cng = CngTracker(prefs)
         applySettings()
         prefs.registerListener(prefsListener)
         createChannel()
@@ -143,6 +149,7 @@ class ObdService : Service() {
         saveTrip()
         synchronized(tripLock) { trip.reset() }
         gears.flush()
+        cng.flush()
         logger?.stop()
         logger = null
         releaseWakeLock()
@@ -248,6 +255,7 @@ class ObdService : Service() {
         ObdRepository.setState(ConnState.WAITING_FOR_ECU, "Waiting for ignition...")
         updateNotification("Waiting for ignition")
         gears.flush()
+        cng.flush()
         while (currentCoroutineContext().isActive) {
             // The adapter reads battery voltage off the port even with the car off.
             adapterVoltage = elm.readBatteryVoltage()
@@ -338,6 +346,7 @@ class ObdService : Service() {
             }
             if (now - lastGearFlushAt >= GEAR_FLUSH_MS) {
                 gears.flush()
+                cng.flush()
                 lastGearFlushAt = now
             }
         }
@@ -390,8 +399,11 @@ class ObdService : Service() {
         if (throttle != null && Pids.THROTTLE in fresh) closedThrottle.update(throttle)
         val throttleClosed = throttle?.let { closedThrottle.isClosed(it) }
 
+        val fuel = FuelSelector.active(s, readings)
+        val fuelFromEcu = s.fuelSystem.isBiFuel && s.fuelDetection == FuelDetection.AUTO &&
+                FuelSelector.reported(s, readings) != null
         val fuelCut = Metrics.isFuelCut(readings, throttleClosed)
-        val fuelRate = if (fuelCut) 0f else Metrics.fuelRateLitresPerHour(readings, throttleClosed, s)
+        val fuelRate = if (fuelCut) 0f else Metrics.fuelRatePerHour(readings, fuel, throttleClosed, s)
         val speed = readings[Pids.SPEED]
         val rpm = readings[Pids.RPM]
         val boost = Metrics.boostKpa(readings)
@@ -406,14 +418,20 @@ class ObdService : Service() {
 
         val speedFresh = Pids.SPEED in fresh
         val tripStats = synchronized(tripLock) {
-            trip.update(readings, fuelRate, power, boost, speedFresh, s, now)
+            val step = trip.update(
+                readings, fuel, fuelRate, power, boost, speedFresh, s,
+                cng.remainingKg(), cng.lifetimeKmPerKg(), now
+            )
+            if (step != null && step.fuel == Fuel.CNG) cng.burn(step.amount, step.km)
             trip.stats
         }
         if (speedFresh) perf.update(speed, now)
 
         val derived = ObdRepository.Derived(
-            fuelRateLh = fuelRate,
-            consumptionL100 = Metrics.consumptionPer100Km(fuelRate, speed),
+            fuel = fuel,
+            fuelFromEcu = fuelFromEcu,
+            fuelRate = fuelRate,
+            consumptionPer100 = Metrics.consumptionPer100Km(fuelRate, speed),
             boostKpa = boost,
             powerKw = power,
             torqueNm = Metrics.torqueNm(readings),
@@ -422,7 +440,7 @@ class ObdService : Service() {
         )
         val snapshot = ObdRepository.Live(readings, derived, lastGear, now)
 
-        val alertResult = alerts.evaluate(snapshot, milOn, s, now)
+        val alertResult = alerts.evaluate(snapshot, milOn, tripStats, s, now)
         alertResult.fired.forEach { sounder.play(it, s.alertBeep, s.alertVoice) }
         if (alertResult.changed) ObdRepository.publishAlerts(alertResult.active)
 
@@ -434,7 +452,8 @@ class ObdService : Service() {
         if (now - lastNotifyAt >= NOTIFY_INTERVAL_MS) {
             lastNotifyAt = now
             val gearText = if (lastGear.label == "-") "" else "   gear " + lastGear.label
-            updateNotification("%.0f km/h   %.0f rpm".format(speed ?: 0f, rpm ?: 0f) + gearText)
+            val fuelText = if (s.fuelSystem.isBiFuel) "   " + fuel.label else ""
+            updateNotification("%.0f km/h   %.0f rpm".format(speed ?: 0f, rpm ?: 0f) + gearText + fuelText)
         }
     }
 
@@ -466,6 +485,10 @@ class ObdService : Service() {
                     gears.reset()
                     lastGear = GearReading.UNKNOWN
                     ObdRepository.trace("-- learned gears cleared")
+                }
+                is ObdRepository.Task.CngFilled -> {
+                    cng.refill(task.kg)
+                    ObdRepository.trace("-- CNG fill-up logged: %.1f kg".format(task.kg))
                 }
                 is ObdRepository.Task.Raw -> elm.sendRaw(task.command)
             }

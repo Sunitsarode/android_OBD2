@@ -26,12 +26,17 @@ object ObdRepository {
         object ResetTrip : Task()
         object ResetPerf : Task()
         object ResetGears : Task()
+        data class CngFilled(val kg: Float) : Task()
         data class Raw(val command: String) : Task()
     }
 
     data class Derived(
-        val fuelRateLh: Float? = null,
-        val consumptionL100: Float? = null,
+        /** The fuel burning now; rates and consumption below are in its unit (L, or kg for CNG). */
+        val fuel: Fuel = Fuel.PETROL,
+        /** True when the ECU reports which fuel is in use, so a manual choice would be overridden. */
+        val fuelFromEcu: Boolean = false,
+        val fuelRate: Float? = null,
+        val consumptionPer100: Float? = null,
         val boostKpa: Float? = null,
         val powerKw: Float? = null,
         val torqueNm: Float? = null,

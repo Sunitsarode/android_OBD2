@@ -88,6 +88,7 @@ object Pids {
         Pid(0x4C, 1, "Commanded throttle actuator", "THR ACT", "%", 0f, 100f, Tier.MEDIUM, ::pct255),
         Pid(0x4D, 2, "Time run with MIL on", "MIL TIME", "min", 0f, 65535f, Tier.SLOW, ::word),
         Pid(0x4E, 2, "Time since codes cleared", "CLR TIME", "min", 0f, 65535f, Tier.SLOW, ::word),
+        Pid(0x51, 1, "Fuel type", "FUEL TYPE", "", 0f, 23f, Tier.MEDIUM) { it[0].toFloat() },
         Pid(0x52, 1, "Ethanol fuel percentage", "ETHANOL", "%", 0f, 100f, Tier.SLOW, ::pct255),
         Pid(0x59, 2, "Fuel rail absolute pressure", "RAIL ABS", "kPa", 0f, 655350f, Tier.SLOW) { (it[0] * 256 + it[1]) * 10f },
         Pid(0x5A, 1, "Relative accelerator pedal", "REL PEDAL", "%", 0f, 100f, Tier.MEDIUM, ::pct255),
@@ -127,6 +128,7 @@ object Pids {
     const val REF_TORQUE = 0x63
     const val RUNTIME = 0x1F
     const val FUEL_SYSTEM = 0x03
+    const val FUEL_TYPE = 0x51
     const val REL_THROTTLE = 0x45
     const val REL_PEDAL = 0x5A
     const val ODOMETER = 0xA6

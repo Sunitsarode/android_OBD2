@@ -5,6 +5,7 @@ import android.graphics.Rect
 import android.os.SystemClock
 import android.view.Surface
 import androidx.car.app.AppManager
+import androidx.car.app.CarToast
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
 import androidx.car.app.SurfaceCallback
@@ -19,12 +20,16 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.obd2dash.R
+import com.obd2dash.core.Fuel
+import com.obd2dash.core.FuelSelector
 import com.obd2dash.core.ObdRepository
 import com.obd2dash.core.Prefs
 import com.obd2dash.core.Settings
 import com.obd2dash.ui.DashMetrics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -52,6 +57,7 @@ class DashboardScreen(carContext: CarContext) : Screen(carContext), SurfaceCallb
     private var tiles: List<DashMetrics.Metric> = emptyList()
     private var settingsReadAt = 0L
     private var offeredConnect = false
+    private var offeredFuel: Pair<Fuel, Boolean>? = null
 
     init {
         carContext.getCarService(AppManager::class.java).setSurfaceCallback(this)
@@ -65,6 +71,12 @@ class DashboardScreen(carContext: CarContext) : Screen(carContext), SurfaceCallb
                         if (idle != offeredConnect) invalidate()
                     }
                 }
+                launch {
+                    // The fuel button's label follows the fuel in use.
+                    ObdRepository.live.map { it.derived.fuel to it.derived.fuelFromEcu }
+                        .distinctUntilChanged()
+                        .collect { if (it != offeredFuel) invalidate() }
+                }
                 withContext(Dispatchers.Default) {
                     while (isActive) {
                         drawFrame()
@@ -77,6 +89,9 @@ class DashboardScreen(carContext: CarContext) : Screen(carContext), SurfaceCallb
 
     override fun onGetTemplate(): Template {
         offeredConnect = CarConnection.isIdle(ObdRepository.connectionState.value)
+        val live = ObdRepository.live.value
+        offeredFuel = live.derived.fuel to live.derived.fuelFromEcu
+        val s = prefs.snapshot()
         val strip = ActionStrip.Builder()
         // A navigation action strip allows only one titled action; the rest are icons.
         if (offeredConnect) {
@@ -86,11 +101,29 @@ class DashboardScreen(carContext: CarContext) : Screen(carContext), SurfaceCallb
                     .setOnClickListener { CarConnection.connectIfIdle(carContext, quiet = false) }
                     .build()
             )
+        } else if (s.fuelSystem.isBiFuel && !live.derived.fuelFromEcu) {
+            // Manual detection: the driver flips this when pressing the car's fuel switch.
+            val fuel = FuelSelector.active(s, live.readings)
+            strip.addAction(
+                Action.Builder()
+                    .setTitle("Fuel: " + fuel.label)
+                    .setOnClickListener { toggleFuel() }
+                    .build()
+            )
         }
         strip.addAction(iconAction(R.drawable.ic_nav_sensors) { screenManager.push(SensorsScreen(carContext)) })
         strip.addAction(iconAction(R.drawable.ic_nav_trip) { screenManager.push(TripScreen(carContext)) })
         strip.addAction(iconAction(R.drawable.ic_nav_codes) { screenManager.push(CodesScreen(carContext)) })
         return NavigationTemplate.Builder().setActionStrip(strip.build()).build()
+    }
+
+    private fun toggleFuel() {
+        val system = prefs.fuelSystem
+        val secondary = system.secondary ?: return
+        val next = if (prefs.manualFuel == secondary) system.primary else secondary
+        prefs.manualFuel = next
+        CarToast.makeText(carContext, "Counting fuel as " + next.label, CarToast.LENGTH_SHORT).show()
+        invalidate()
     }
 
     private fun iconAction(icon: Int, onClick: () -> Unit): Action =
@@ -149,8 +182,10 @@ class DashboardScreen(carContext: CarContext) : Screen(carContext), SurfaceCallb
         val current = settings
         val s = if (current == null || now - settingsReadAt > SETTINGS_REFRESH_MS) {
             settingsReadAt = now
-            tiles = carTiles()
-            prefs.snapshot().also { settings = it }
+            prefs.snapshot().also {
+                settings = it
+                tiles = carTiles(it)
+            }
         } else current
         return CarDashRenderer.Frame(
             live = ObdRepository.live.value,
@@ -164,9 +199,9 @@ class DashboardScreen(carContext: CarContext) : Screen(carContext), SurfaceCallb
     }
 
     /** The first tiles chosen on the phone's dashboard, so both screens agree. */
-    private fun carTiles(): List<DashMetrics.Metric> {
+    private fun carTiles(s: Settings): List<DashMetrics.Metric> {
         val saved = prefs.dashTiles.split(',').map { it.trim() }.filter { it.isNotEmpty() }
-        val keys = if (saved.size == DashMetrics.TILE_COUNT) saved else DashMetrics.DEFAULT_KEYS
+        val keys = if (saved.size == DashMetrics.TILE_COUNT) saved else DashMetrics.defaultKeys(s)
         return keys.take(CAR_TILE_COUNT).mapNotNull { DashMetrics.resolve(it) }
     }
 

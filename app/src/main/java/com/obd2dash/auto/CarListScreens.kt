@@ -105,20 +105,36 @@ class TripScreen(carContext: CarContext) : LiveListScreen(carContext, ObdReposit
 
     override fun onGetTemplate(): Template {
         val t = ObdRepository.trip.value
-        val imp = prefs.imperialUnits
+        val s = prefs.snapshot()
+        val imp = s.imperial
         val dist = Format.distanceUnit(imp)
+
+        // One fuel row per fuel burned; a bi-fuel trip has both.
+        val fuelText = t.fuelUse.joinToString("; ") { use ->
+            val (amount, amountUnit) = Format.amount(use.amount, use.fuel, imp)
+            val (economy, economyUnit) = Format.economy(use.per100Km, use.fuel, s)
+            use.fuel.label + " " + amount + " " + amountUnit + ", " + economy + " " + economyUnit
+        }.ifEmpty { "Nothing burned yet" }
+
+        val rangeText = listOfNotNull(
+            t.cngRangeKm?.let { "CNG " + Format.distance(it, imp) + " " + dist },
+            t.cngRemainingKg?.let { "(" + Format.num(it, 1) + " kg left)" },
+            t.rangeKm?.let { (s.fuelSystem.tankFuel?.label ?: "Tank") + " " + Format.distance(it, imp) + " " + dist }
+        ).joinToString(" ").ifEmpty {
+            if (s.fuelSystem.usesCng) "Log a CNG fill-up on the phone's Trip tab" else "--"
+        }
+
         val rows = listOf(
             row("Distance", Format.distance(t.distanceKm, imp) + " " + dist + " in " + Format.duration(t.elapsedSeconds) +
                     " (idle " + Format.duration(t.idleSeconds) + ")"),
-            row("Fuel", Format.volume(t.fuelUsedLitres, imp) + " " + Format.volumeUnit(imp) + " used, " +
-                    Format.consumption(t.avgConsumptionL100, imp) + " " + Format.consumptionUnit(imp) + " average"),
-            row("Cost", if (t.cost == null) "Set the fuel price in the phone app's Settings"
+            row("Fuel", fuelText),
+            row("Cost", if (t.cost == null) "Set fuel prices in the phone app's Settings"
                 else Format.money(t.cost) + " (" + Format.money(t.costPerKm) + " per km)"),
+            row("Range", rangeText),
             row("Driving", "Eco score " + (t.ecoScore?.toString() ?: "--") + ", " + t.harshAccelerations +
                     " harsh accel, " + t.harshBrakings + " harsh brake"),
             row("Speed", "Average " + Format.speed(t.avgSpeedKmh, imp) + ", max " + Format.speed(t.maxSpeedKmh, imp) +
-                    " " + Format.speedUnit(imp)),
-            row("Range", Format.distance(t.rangeKm, imp) + " " + dist)
+                    " " + Format.speedUnit(imp))
         )
         return list("Trip", rows, "No trip yet")
     }

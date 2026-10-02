@@ -34,8 +34,9 @@ class CsvLogger(private val context: Context) {
                 val pid = Pids.BY_ID[id] ?: return@forEach
                 header += pid.short.replace(' ', '_') + "_" + pid.unit.replace('/', '_')
             }
+            // Fuel columns are litres, or kg when fuel_in_use is CNG.
             header += listOf(
-                "fuel_rate_Lh", "consumption_L100km", "boost_kPa", "power_kW",
+                "fuel_in_use", "fuel_rate_per_h", "consumption_per_100km", "boost_kPa", "power_kW",
                 "gear_0_is_neutral", "adapter_V", "fuel_cut"
             )
             w.write(header.joinToString(","))
@@ -55,8 +56,9 @@ class CsvLogger(private val context: Context) {
             row += live.at.toString()
             row += elapsedSeconds.toString()
             columns.forEach { row += live.readings[it].fmt() }
-            row += d.fuelRateLh.fmt()
-            row += d.consumptionL100.fmt()
+            row += d.fuel.name
+            row += d.fuelRate.fmt()
+            row += d.consumptionPer100.fmt()
             row += d.boostKpa.fmt()
             row += d.powerKw.fmt()
             row += live.gear.gear?.toString() ?: ""

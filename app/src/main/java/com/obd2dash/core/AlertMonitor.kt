@@ -19,7 +19,10 @@ class AlertMonitor {
         LOW_VOLTAGE("Battery voltage low", "Battery voltage low.", true, 300_000L),
         OVERSPEED("Over speed limit", "Speed limit.", false, 15_000L),
         OVER_REV("High RPM", "Engine speed high.", false, 10_000L),
-        LOW_FUEL("Low fuel", "Fuel level low.", false, 600_000L)
+        LOW_FUEL("Low fuel", "Fuel level low.", false, 600_000L),
+        LOW_CNG("Low CNG (estimated)", "C N G running low.", false, 600_000L),
+        SWITCHED_TO_PETROL("Switched to petrol", "Switched to petrol.", false, 0L),
+        CYLINDER_TEST("CNG cylinder test due", "C N G cylinder test is due.", false, 0L)
     }
 
     class Result(val active: Set<Alert>, val fired: List<Alert>, val changed: Boolean)
@@ -28,15 +31,19 @@ class AlertMonitor {
     private val lastFired = EnumMap<Alert, Long>(Alert::class.java)
     private var lowVoltageSince = 0L
     private var milBaselineKnown = false
+    private var lastFuel: Fuel? = null
+    private var switchedToPetrolAt = 0L
 
     fun reset() {
         active.clear()
         lastFired.clear()
         lowVoltageSince = 0L
         milBaselineKnown = false
+        lastFuel = null
+        switchedToPetrolAt = 0L
     }
 
-    fun evaluate(live: ObdRepository.Live, milOn: Boolean?, s: Settings, now: Long): Result {
+    fun evaluate(live: ObdRepository.Live, milOn: Boolean?, trip: TripStats, s: Settings, now: Long): Result {
         val before = EnumSet.copyOf(active)
         val r = live.readings
         val speed = r[Pids.SPEED]
@@ -61,6 +68,26 @@ class AlertMonitor {
         lowVoltageSince = if (lowNow) (if (lowVoltageSince == 0L) now else lowVoltageSince) else 0L
         latch(Alert.LOW_VOLTAGE, engineRunning && volts != null,
             on = lowNow && now - lowVoltageSince >= LOW_VOLTAGE_HOLD_MS, off = (volts ?: 0f) > RECOVERED_VOLTS)
+
+        // CNG level is an estimate counted down from the last fill-up.
+        val cngLeft = trip.cngRemainingKg
+        latch(Alert.LOW_CNG, s.fuelSystem.usesCng && s.lowCngKg > 0f && cngLeft != null,
+            on = (cngLeft ?: 99f) < s.lowCngKg, off = (cngLeft ?: 0f) > s.lowCngKg + 0.5f)
+
+        // A bi-fuel car drops to petrol by itself when the cylinder runs dry, which is
+        // easy to miss and costs more per km. Only automatic detection can see it happen;
+        // in manual mode the driver made the switch.
+        val fuel = live.derived.fuel
+        if (lastFuel == Fuel.CNG && fuel == Fuel.PETROL && live.derived.fuelFromEcu && (speed ?: 0f) > 5f) {
+            switchedToPetrolAt = now
+        }
+        lastFuel = fuel
+        val recentlySwitched = switchedToPetrolAt != 0L && now - switchedToPetrolAt < SWITCH_NOTICE_MS
+        latch(Alert.SWITCHED_TO_PETROL, s.fuelSystem.usesCng, on = recentlySwitched, off = !recentlySwitched)
+
+        // Indian rules require a hydrostatic test every three years; warn a month ahead.
+        val testDue = s.cylinderTestDueMs > 0L && now >= s.cylinderTestDueMs - TEST_WARNING_MS
+        latch(Alert.CYLINDER_TEST, s.fuelSystem.usesCng && s.cylinderTestDueMs > 0L, on = testDue, off = !testDue)
 
         // A lamp already on at connect is shown, but only a lamp that comes on mid-drive sounds.
         if (milOn != null) {
@@ -103,5 +130,7 @@ class AlertMonitor {
         const val RECOVERED_VOLTS = 12.3f
         const val LOW_VOLTAGE_HOLD_MS = 10_000L
         const val REFIRE_GUARD_MS = 5_000L
+        const val SWITCH_NOTICE_MS = 15_000L
+        const val TEST_WARNING_MS = 30L * 24 * 60 * 60 * 1000
     }
 }

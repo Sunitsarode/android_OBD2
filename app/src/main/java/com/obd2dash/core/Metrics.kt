@@ -15,22 +15,28 @@ object Metrics {
     private const val FUEL_STATUS_LOAD_OR_DECEL = 4
 
     /**
-     * Fuel flow in litres per hour.
+     * Fuel flow per hour in the fuel's own unit: litres, or kg for CNG.
      *
-     * Preference order: the ECU's own fuel-rate PID, then mass airflow divided by
-     * the stoichiometric ratio, then a speed-density estimate for engines with
-     * no MAF sensor.
+     * Preference order: the ECU's fuel-rate PID, then mass airflow divided by
+     * the fuel's stoichiometric ratio, then a speed-density estimate for engines
+     * with no MAF sensor. The engine breathes the same air whichever fuel it
+     * burns, so the airflow method works for CNG too.
      */
-    fun fuelRateLitresPerHour(readings: Map<Int, Float>, throttleClosed: Boolean?, s: Settings): Float? {
-        readings[Pids.FUEL_RATE]?.let { rate ->
-            // Some ECUs advertise this PID and always answer zero. Zero is only
-            // believable with the throttle shut, where the engine may be in fuel cut.
-            val suspicious = rate == 0f && (readings[Pids.RPM] ?: 0f) > 1500f && throttleClosed == false
-            if (!suspicious) return rate
+    fun fuelRatePerHour(readings: Map<Int, Float>, fuel: Fuel, throttleClosed: Boolean?, s: Settings): Float? {
+        // The fuel-rate PID describes liquid injection by the main ECU. On a bi-fuel
+        // car burning gas it reports what petrol would have used, so trust it only
+        // for the car's own liquid fuel.
+        if (fuel == s.fuelSystem.tankFuel) {
+            readings[Pids.FUEL_RATE]?.let { rate ->
+                // Some ECUs advertise this PID and always answer zero. Zero is only
+                // believable with the throttle shut, where the engine may be in fuel cut.
+                val suspicious = rate == 0f && (readings[Pids.RPM] ?: 0f) > 1500f && throttleClosed == false
+                if (!suspicious) return rate
+            }
         }
-        val maf = readings[Pids.MAF] ?: estimateMafFromSpeedDensity(readings, s) ?: return null
-        val gramsFuelPerSecond = maf / s.fuelType.stoichAfr
-        return gramsFuelPerSecond * SECONDS_PER_HOUR / s.fuelType.densityGramsPerLitre
+        val air = readings[Pids.MAF] ?: estimateMafFromSpeedDensity(readings, s) ?: return null
+        val gramsFuelPerHour = air / fuel.stoichAfr * SECONDS_PER_HOUR
+        return fuel.amountFromGrams(gramsFuelPerHour)
     }
 
     /**
@@ -62,10 +68,10 @@ object Metrics {
         return status == FUEL_STATUS_LOAD_OR_DECEL && throttleClosed == true && rpm > 1100f
     }
 
-    /** Instantaneous consumption in L/100km. Null below walking pace, where it diverges. */
-    fun consumptionPer100Km(fuelRateLh: Float?, speedKmh: Float?): Float? {
-        if (fuelRateLh == null || speedKmh == null || speedKmh < 5f) return null
-        return fuelRateLh / speedKmh * 100f
+    /** Instantaneous litres (or kg) per 100 km. Null below walking pace, where it diverges. */
+    fun consumptionPer100Km(fuelPerHour: Float?, speedKmh: Float?): Float? {
+        if (fuelPerHour == null || speedKmh == null || speedKmh < 5f) return null
+        return fuelPerHour / speedKmh * 100f
     }
 
     /** Manifold pressure relative to ambient. Positive is boost, negative is vacuum. */
@@ -94,7 +100,7 @@ object Metrics {
         return maf * MAF_TO_KW
     }
 
-    /** Remaining range in km from tank level and the trip's average consumption. */
+    /** Remaining range on the liquid tank, from PID 2F and that fuel's average consumption. */
     fun rangeKm(readings: Map<Int, Float>, avgL100: Float?, s: Settings): Float? {
         val levelPercent = readings[Pids.FUEL_LEVEL] ?: return null
         if (avgL100 == null || avgL100 <= 0f) return null

@@ -153,9 +153,24 @@ class CodesFragment : Fragment() {
             val item = ItemDtcBinding.inflate(inflater, container, false)
             item.dtcCode.text = entry.code
             item.dtcKind.text = entry.kind.label.uppercase()
-            item.dtcDescription.text = entry.description
+            item.dtcDescription.text = entry.description + (cngHint(entry.code)?.let { "\n" + it } ?: "")
             item.dtcSystem.text = entry.system
             container.addView(item.root)
+        }
+    }
+
+    /**
+     * Some generic codes have a usual suspect on gas: lean mixtures from a clogged
+     * filter or low regulator pressure, and misfires from plugs that gas wears faster.
+     */
+    private fun cngHint(code: String): String? {
+        if (!Prefs(requireContext()).fuelSystem.usesCng) return null
+        return when (code) {
+            "P0171", "P0174" -> "On CNG: often a clogged CNG filter, low regulator pressure, or an intake air leak."
+            "P0172", "P0175" -> "On CNG: check the gas injectors and pressure regulator."
+            "P0300", "P0301", "P0302", "P0303", "P0304" ->
+                "On CNG: gas is harder on spark plugs and coils; check those first."
+            else -> null
         }
     }
 

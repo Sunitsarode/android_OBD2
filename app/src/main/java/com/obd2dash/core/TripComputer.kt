@@ -10,23 +10,31 @@ data class TripStats(
     val movingSeconds: Long = 0,
     val idleSeconds: Long = 0,
     val distanceKm: Float = 0f,
-    val fuelUsedLitres: Float = 0f,
+    /** Each fuel burned this trip, in litres or kg, with the distance driven on it. */
+    val fuelUse: List<FuelUse> = emptyList(),
     val avgSpeedKmh: Float = 0f,
     val avgMovingSpeedKmh: Float = 0f,
-    val avgConsumptionL100: Float? = null,
     val maxSpeedKmh: Float = 0f,
     val maxRpm: Float = 0f,
     val maxCoolantC: Float = 0f,
     val maxBoostKpa: Float = 0f,
     val maxPowerKw: Float = 0f,
+    /** Range on the liquid tank, from its level PID. */
     val rangeKm: Float? = null,
+    val cngRemainingKg: Float? = null,
+    val cngRangeKm: Float? = null,
     val cost: Float? = null,
     val costPerKm: Float? = null,
     val harshAccelerations: Int = 0,
     val harshBrakings: Int = 0,
     val highRpmSeconds: Long = 0,
     val ecoScore: Int? = null
-)
+) {
+    fun use(fuel: Fuel): FuelUse? = fuelUse.firstOrNull { it.fuel == fuel }
+
+    /** Range on whichever fuel is in use. */
+    fun rangeFor(fuel: Fuel): Float? = if (fuel == Fuel.CNG) cngRangeKm else rangeKm
+}
 
 data class PerfResults(
     val zeroTo60Kmh: Float? = null,
@@ -50,7 +58,8 @@ class TripComputer {
     private var startedAt = System.currentTimeMillis()
     private var lastSample = 0L
     private var distanceKm = 0f
-    private var fuelLitres = 0f
+    private val fuelAmounts = java.util.EnumMap<Fuel, Float>(Fuel::class.java)
+    private val fuelDistances = java.util.EnumMap<Fuel, Float>(Fuel::class.java)
     private var movingMs = 0L
     private var idleMs = 0L
     private var highRpmMs = 0L
@@ -78,7 +87,8 @@ class TripComputer {
         startedAt = System.currentTimeMillis()
         lastSample = 0L
         distanceKm = 0f
-        fuelLitres = 0f
+        fuelAmounts.clear()
+        fuelDistances.clear()
         movingMs = 0L
         idleMs = 0L
         highRpmMs = 0L
@@ -95,18 +105,28 @@ class TripComputer {
         stats = TripStats(startedAt = startedAt)
     }
 
+    /** What one sample added: the fuel burned and the distance covered on it. */
+    class Step(val fuel: Fuel, val amount: Float, val km: Float)
+
+    /**
+     * Integrates one sample. Returns what it added, or null for the first sample
+     * of a trip, which only sets the clock.
+     */
     fun update(
         readings: Map<Int, Float>,
-        fuelRateLh: Float?,
+        fuel: Fuel,
+        fuelPerHour: Float?,
         powerKw: Float?,
         boostKpa: Float?,
         speedFresh: Boolean,
         s: Settings,
+        cngRemainingKg: Float?,
+        cngLifetimeKmPerKg: Float?,
         now: Long
-    ) {
+    ): Step? {
         if (lastSample == 0L) {
             lastSample = now
-            return
+            return null
         }
         val deltaMs = (now - lastSample).coerceIn(0L, MAX_SAMPLE_GAP_MS)
         lastSample = now
@@ -114,10 +134,14 @@ class TripComputer {
 
         val speed = readings[Pids.SPEED] ?: 0f
         val rpm = readings[Pids.RPM]
-        distanceKm += speed * deltaHours
+        val stepKm = speed * deltaHours
+        val stepAmount = (fuelPerHour ?: 0f) * deltaHours
+        distanceKm += stepKm
+        fuelDistances[fuel] = (fuelDistances[fuel] ?: 0f) + stepKm
+        if (fuelPerHour != null) fuelAmounts[fuel] = (fuelAmounts[fuel] ?: 0f) + stepAmount
+
         if (speed >= 1f) movingMs += deltaMs else idleMs += deltaMs
-        if (fuelRateLh != null) fuelLitres += fuelRateLh * deltaHours
-        val highRpm = if (s.fuelType == Prefs.FuelType.DIESEL) 2500f else 3000f
+        val highRpm = if (s.fuelSystem.primary == Fuel.DIESEL) 2500f else 3000f
         if ((rpm ?: 0f) > highRpm) highRpmMs += deltaMs
         if (speedFresh) trackHarshEvents(speed, now)
 
@@ -127,34 +151,55 @@ class TripComputer {
         boostKpa?.let { maxBoost = max(maxBoost, it) }
         powerKw?.let { maxPower = max(maxPower, it) }
 
+        val uses = Fuel.values().mapNotNull { f ->
+            val km = fuelDistances[f] ?: 0f
+            val amount = fuelAmounts[f] ?: 0f
+            if (km <= 0f && amount <= 0f) null else FuelUse(f, amount, km)
+        }
+
+        // Priced at today's prices, so a price entered mid-trip still counts.
+        var cost = 0f
+        var priced = false
+        for (use in uses) {
+            val price = s.priceOf(use.fuel)
+            if (price > 0f) {
+                cost += use.amount * price
+                priced = true
+            }
+        }
+
+        val tankPer100 = s.fuelSystem.tankFuel?.let { tank -> uses.firstOrNull { it.fuel == tank }?.per100Km }
+        // This trip's CNG economy once it has some distance behind it, else the long-run figure.
+        val cngKmPerKg = uses.firstOrNull { it.fuel == Fuel.CNG && it.distanceKm >= 5f }
+            ?.per100Km?.let { 100f / it } ?: cngLifetimeKmPerKg
+
         val elapsedMs = now - startedAt
         val elapsedHours = elapsedMs / 3_600_000f
-        val avgConsumption = if (distanceKm > 0.1f && fuelLitres > 0f) fuelLitres / distanceKm * 100f else null
-        val cost = if (s.fuelPricePerLitre > 0f) fuelLitres * s.fuelPricePerLitre else null
-
         stats = TripStats(
             startedAt = startedAt,
             elapsedSeconds = elapsedMs / 1000,
             movingSeconds = movingMs / 1000,
             idleSeconds = idleMs / 1000,
             distanceKm = distanceKm,
-            fuelUsedLitres = fuelLitres,
+            fuelUse = uses,
             avgSpeedKmh = if (elapsedHours > 0f) distanceKm / elapsedHours else 0f,
             avgMovingSpeedKmh = if (movingMs > 0) distanceKm / (movingMs / 3_600_000f) else 0f,
-            avgConsumptionL100 = avgConsumption,
             maxSpeedKmh = maxSpeed,
             maxRpm = maxRpm,
             maxCoolantC = maxCoolant,
             maxBoostKpa = maxBoost,
             maxPowerKw = maxPower,
-            rangeKm = Metrics.rangeKm(readings, avgConsumption, s),
-            cost = cost,
-            costPerKm = if (cost != null && distanceKm > 0.5f) cost / distanceKm else null,
+            rangeKm = Metrics.rangeKm(readings, tankPer100, s),
+            cngRemainingKg = cngRemainingKg,
+            cngRangeKm = if (cngRemainingKg != null && cngKmPerKg != null) cngRemainingKg * cngKmPerKg else null,
+            cost = if (priced) cost else null,
+            costPerKm = if (priced && distanceKm > 0.5f) cost / distanceKm else null,
             harshAccelerations = harshAccel,
             harshBrakings = harshBrake,
             highRpmSeconds = highRpmMs / 1000,
             ecoScore = ecoScore()
         )
+        return Step(fuel, stepAmount, stepKm)
     }
 
     /**
@@ -212,8 +257,7 @@ class TripComputer {
             startedAt = s.startedAt,
             durationSeconds = s.elapsedSeconds,
             distanceKm = s.distanceKm,
-            fuelLitres = s.fuelUsedLitres,
-            avgConsumptionL100 = s.avgConsumptionL100,
+            fuelUse = s.fuelUse,
             cost = s.cost,
             maxSpeedKmh = s.maxSpeedKmh,
             ecoScore = s.ecoScore,

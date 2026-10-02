@@ -1,6 +1,8 @@
 package com.obd2dash.ui
 
+import com.obd2dash.core.Fuel
 import com.obd2dash.core.Metrics
+import com.obd2dash.core.Settings
 import com.obd2dash.obd.Pids
 
 /** Formats readings for display, converting to imperial units when asked. */
@@ -34,16 +36,54 @@ object Format {
 
     fun powerUnit(imperial: Boolean) = if (imperial) "hp" else "kW"
 
-    /** Imperial economy is shown as mpg, where bigger is better, so the scale inverts. */
-    fun consumption(l100: Float?, imperial: Boolean): String =
-        num(l100?.let { if (imperial) Metrics.l100ToMpgImperial(it) else it }, 1)
+    /**
+     * Economy for [fuel], from litres (or kg) per 100 km. India counts distance
+     * per unit (km/L, km/kg), so that is the default; per 100 km is a setting.
+     */
+    fun economy(per100: Float?, fuel: Fuel, s: Settings): Pair<String, String> {
+        val unit = economyUnit(fuel, s)
+        if (per100 == null || per100 <= 0f) return "--" to unit
+        val value = when {
+            s.imperial && fuel.soldByMass -> 100f / per100 * 0.621371f
+            s.imperial -> Metrics.l100ToMpgImperial(per100)
+            s.economyPerDistance -> 100f / per100
+            else -> per100
+        }
+        return num(value, 1) to unit
+    }
 
-    fun consumptionUnit(imperial: Boolean) = if (imperial) "mpg" else "L/100km"
+    fun economyUnit(fuel: Fuel, s: Settings): String = when {
+        s.imperial && fuel.soldByMass -> "mi/kg"
+        s.imperial -> "mpg"
+        s.economyPerDistance -> if (fuel.soldByMass) "km/kg" else "km/L"
+        else -> if (fuel.soldByMass) "kg/100km" else "L/100km"
+    }
 
-    fun volume(litres: Float?, imperial: Boolean): String =
-        num(litres?.let { if (imperial) it * 0.219969f else it }, 2)
+    /** A quantity of fuel: kg for CNG, litres (or gallons) for liquids. */
+    fun amount(value: Float?, fuel: Fuel, imperial: Boolean): Pair<String, String> = when {
+        fuel.soldByMass -> num(value, 2) to "kg"
+        imperial -> num(value?.times(0.219969f), 2) to "gal"
+        else -> num(value, 2) to "L"
+    }
 
-    fun volumeUnit(imperial: Boolean) = if (imperial) "gal" else "L"
+    /** Fuel flow per hour, in the same units as [amount]. */
+    fun rate(perHour: Float?, fuel: Fuel, imperial: Boolean): Pair<String, String> =
+        amount(perHour, fuel, imperial).let { (value, unit) -> value to unit + "/h" }
+
+    private val FUEL_TYPES = listOf(
+        "Not available", "Petrol", "Methanol", "Ethanol", "Diesel", "LPG", "CNG", "Propane", "Electric",
+        "Bi-fuel running petrol", "Bi-fuel running methanol", "Bi-fuel running ethanol",
+        "Bi-fuel running LPG", "Bi-fuel running CNG", "Bi-fuel running propane",
+        "Bi-fuel running electric", "Bi-fuel electric and engine", "Hybrid petrol", "Hybrid ethanol",
+        "Hybrid diesel", "Hybrid electric", "Hybrid electric and engine", "Hybrid regenerative",
+        "Bi-fuel running diesel"
+    )
+
+    /** PID 51, the SAE fuel-type code. */
+    fun fuelType(code: Float?): String {
+        val index = code?.toInt() ?: return "--"
+        return FUEL_TYPES.getOrNull(index) ?: ("Code " + index)
+    }
 
     fun duration(seconds: Long) = Metrics.formatDuration(seconds)
 
@@ -54,6 +94,7 @@ object Format {
     fun pidValue(pid: Pids.Pid, value: Float?, imperial: Boolean): Pair<String, String> {
         if (value == null) return "--" to pid.unit
         if (pid.id == Pids.FUEL_SYSTEM) return fuelSystem(value) to ""
+        if (pid.id == Pids.FUEL_TYPE) return fuelType(value) to ""
         if (!imperial) return num(value, decimalsFor(pid)) to pid.unit
         return when (pid.unit) {
             "km/h" -> speed(value, true) to "mph"

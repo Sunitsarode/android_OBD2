@@ -71,6 +71,34 @@ second drive onward the gear appears as soon as a shift settles.
   automatic/AMT shows `-` (it cannot tell D from N); CVT shows `D`.
 - **Relearn gears** in Settings after changing tyre size.
 
+## CNG and bi-fuel cars
+
+Set **Fuel system** in Settings to *Petrol + CNG* (or *CNG only*, *Petrol + LPG*).
+
+- **Which fuel is burning** comes from the ECU's fuel-type report (PID 51), whose
+  bi-fuel codes say "running CNG" or "running petrol". Settings shows what your
+  ECU reports right now. If it never changes when you press the CNG switch, set
+  detection to **Manual** and tap the **PETROL / CNG** badge under the gear
+  (or the Fuel button on the Android Auto screen) whenever you switch.
+- **CNG is counted in kg.** Fuel flow is airflow divided by 17.2 (CNG's
+  air-to-fuel ratio), so economy shows as **km/kg** and cost uses the
+  **price per kg**. Petrol stays in km/L. A bi-fuel trip tracks the two
+  separately: used, economy, and distance on each.
+- **CNG left and range.** OBD has no CNG gauge, so the app counts down from
+  your last fill-up. Tap **Log CNG fill-up** on the Trip tab and enter the kg
+  from the receipt (it adds to what is left), or **Full cylinder**. Range uses
+  this trip's km/kg, or your long-run average once you have one.
+- **Alerts:** low CNG (estimated), *switched to petrol* when the car drops
+  back to petrol by itself (automatic detection only), and the cylinder
+  **hydro-test** due date, which Indian rules require every 3 years. Set the
+  date in Settings; the warning starts a month ahead.
+- **Trouble codes:** lean-mixture (P0171/P0174) and misfire (P0300-P0304) codes
+  get a CNG-specific hint, since a clogged gas filter, low regulator pressure,
+  or worn spark plugs are the usual causes on gas.
+
+Economy is shown as km/L and km/kg by default; switch to L/100km and kg/100km
+in Settings.
+
 ## Faster polling
 
 The adapter is probed at connect time for three speedups, each dropped
@@ -189,7 +217,7 @@ computed rather than reported:
 
 | Setting | Why it matters |
 | --- | --- |
-| Fuel type | Sets the stoichiometric ratio and fuel density used for consumption |
+| Fuel system | Which fuels the car burns; sets the air-fuel ratio, units (kg for CNG) and prices |
 | Engine displacement | Only used when the car has no MAF sensor, for the speed-density estimate |
 | Tank capacity | Converts fuel level percentage into remaining range |
 | Redline | Where the tachometer turns red |

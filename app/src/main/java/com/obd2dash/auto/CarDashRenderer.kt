@@ -56,6 +56,7 @@ class CarDashRenderer(context: Context) {
     private val colorAmber = ContextCompat.getColor(context, R.color.amber)
     private val colorDanger = ContextCompat.getColor(context, R.color.danger)
     private val colorAccent = ContextCompat.getColor(context, R.color.accent)
+    private val colorGreen = ContextCompat.getColor(context, R.color.ok)
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
@@ -124,6 +125,15 @@ class CarDashRenderer(context: Context) {
             text.color = colorAmber
             fit("SHIFT UP", centre * 0.95f, min(16f * dp, height * 0.09f))
             canvas.drawText("SHIFT UP", cx, top + height * 0.80f, text)
+        }
+
+        // On a bi-fuel car, which fuel is burning matters as much as the gear.
+        if (s.fuelSystem.isBiFuel) {
+            val fuel = f.live.derived.fuel
+            val label = fuel.label.uppercase()
+            text.color = if (fuel == s.fuelSystem.primary) colorAmber else colorGreen
+            fit(label, centre * 0.95f, min(18f * dp, height * 0.1f))
+            canvas.drawText(label, cx, top + height * 0.96f, text)
         }
     }
 

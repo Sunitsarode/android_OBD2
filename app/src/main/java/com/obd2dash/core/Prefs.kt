@@ -8,13 +8,6 @@ class Prefs(context: Context) {
 
     private val sp: SharedPreferences = context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
-    enum class FuelType(val label: String, val stoichAfr: Float, val densityGramsPerLitre: Float) {
-        PETROL("Petrol", 14.7f, 745f),
-        DIESEL("Diesel", 14.5f, 832f),
-        CNG("CNG", 17.2f, 700f),
-        LPG("LPG", 15.6f, 540f)
-    }
-
     enum class Transmission(val label: String) {
         MANUAL("Manual"),
         AUTOMATIC("Automatic / AMT"),
@@ -44,13 +37,72 @@ class Prefs(context: Context) {
         get() = float("tank", 45f)
         set(v) = put { putFloat("tank", v) }
 
-    var fuelType: FuelType
-        get() = runCatching { FuelType.valueOf(str("fuel") ?: "PETROL") }.getOrDefault(FuelType.PETROL)
-        set(v) = put { putString("fuel", v.name) }
+    var fuelSystem: FuelSystem
+        get() {
+            str("fuelSystem")?.let { saved -> runCatching { return FuelSystem.valueOf(saved) } }
+            // Older versions stored a single fuel; CNG and LPG cars here are bi-fuel.
+            return when (str("fuel")) {
+                "DIESEL" -> FuelSystem.DIESEL
+                "CNG" -> FuelSystem.PETROL_CNG
+                "LPG" -> FuelSystem.PETROL_LPG
+                else -> FuelSystem.PETROL
+            }
+        }
+        set(v) = put { putString("fuelSystem", v.name) }
 
+    var fuelDetection: FuelDetection
+        get() = runCatching { FuelDetection.valueOf(str("fuelDetection") ?: "AUTO") }.getOrDefault(FuelDetection.AUTO)
+        set(v) = put { putString("fuelDetection", v.name) }
+
+    /** The fuel chosen with the dashboard badge, used when detection is manual. */
+    var manualFuel: Fuel
+        get() = runCatching { Fuel.valueOf(str("manualFuel") ?: "PETROL") }.getOrDefault(Fuel.PETROL)
+        set(v) = put { putString("manualFuel", v.name) }
+
+    /** Petrol or diesel price per litre. */
     var fuelPricePerLitre: Float
         get() = float("fuelPrice", 0f)
         set(v) = put { putFloat("fuelPrice", v) }
+
+    var cngPricePerKg: Float
+        get() = float("cngPrice", 0f)
+        set(v) = put { putFloat("cngPrice", v) }
+
+    var lpgPricePerLitre: Float
+        get() = float("lpgPrice", 0f)
+        set(v) = put { putFloat("lpgPrice", v) }
+
+    var cngCapacityKg: Float
+        get() = float("cngCapacity", 9f)
+        set(v) = put { putFloat("cngCapacity", v) }
+
+    /** Low-CNG alert threshold in kg. 0 turns it off. */
+    var lowCngKg: Float
+        get() = float("lowCng", 1f)
+        set(v) = put { putFloat("lowCng", v) }
+
+    /** Cylinder hydrostatic test due date as DD-MM-YYYY, or blank. */
+    var cylinderTestDue: String
+        get() = str("cylinderTest") ?: ""
+        set(v) = put { putString("cylinderTest", v) }
+
+    /** True shows economy as km/L and km/kg; false as L/100km and kg/100km. */
+    var economyPerDistance: Boolean
+        get() = bool("economyPerDistance", true)
+        set(v) = put { putBoolean("economyPerDistance", v) }
+
+    /** Estimated CNG left in kg, counted down from the last fill-up. Negative means unknown. */
+    var cngRemainingKg: Float
+        get() = float("cngRemaining", -1f)
+        set(v) = put { putFloat("cngRemaining", v) }
+
+    var cngLifetimeKm: Float
+        get() = float("cngLifetimeKm", 0f)
+        set(v) = put { putFloat("cngLifetimeKm", v) }
+
+    var cngLifetimeKg: Float
+        get() = float("cngLifetimeKg", 0f)
+        set(v) = put { putFloat("cngLifetimeKg", v) }
 
     var redlineRpm: Int
         get() = int("redline", 6000)
@@ -140,11 +192,19 @@ class Prefs(context: Context) {
 
     fun snapshot() = Settings(
         imperial = imperialUnits,
-        fuelType = fuelType,
+        fuelSystem = fuelSystem,
+        fuelDetection = fuelDetection,
+        manualFuel = manualFuel,
         displacementLitres = displacementLitres,
         volumetricEfficiency = volumetricEfficiency,
         tankLitres = tankLitres,
         fuelPricePerLitre = fuelPricePerLitre,
+        cngPricePerKg = cngPricePerKg,
+        lpgPricePerLitre = lpgPricePerLitre,
+        cngCapacityKg = cngCapacityKg,
+        lowCngKg = lowCngKg,
+        cylinderTestDueMs = parseDate(cylinderTestDue),
+        economyPerDistance = economyPerDistance,
         redlineRpm = redlineRpm,
         transmission = transmission,
         gearCount = gearCount,
@@ -157,6 +217,17 @@ class Prefs(context: Context) {
         fastPolling = fastPolling,
         logging = loggingEnabled
     )
+
+    /** Parses DD-MM-YYYY to epoch millis, or 0 when blank or malformed. */
+    private fun parseDate(text: String): Long {
+        if (text.isBlank()) return 0L
+        return try {
+            val format = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US).apply { isLenient = false }
+            format.parse(text.trim())?.time ?: 0L
+        } catch (_: Exception) {
+            0L
+        }
+    }
 
     fun registerListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) =
         sp.registerOnSharedPreferenceChangeListener(listener)
@@ -172,11 +243,19 @@ class Prefs(context: Context) {
 /** Immutable copy of the settings the polling loop reads every cycle. */
 data class Settings(
     val imperial: Boolean,
-    val fuelType: Prefs.FuelType,
+    val fuelSystem: FuelSystem,
+    val fuelDetection: FuelDetection,
+    val manualFuel: Fuel,
     val displacementLitres: Float,
     val volumetricEfficiency: Float,
     val tankLitres: Float,
     val fuelPricePerLitre: Float,
+    val cngPricePerKg: Float,
+    val lpgPricePerLitre: Float,
+    val cngCapacityKg: Float,
+    val lowCngKg: Float,
+    val cylinderTestDueMs: Long,
+    val economyPerDistance: Boolean,
     val redlineRpm: Int,
     val transmission: Prefs.Transmission,
     val gearCount: Int,
@@ -188,4 +267,11 @@ data class Settings(
     val alertVoice: Boolean,
     val fastPolling: Boolean,
     val logging: Boolean
-)
+) {
+    /** Price per litre, or per kg for CNG. 0 means not set. */
+    fun priceOf(fuel: Fuel): Float = when (fuel) {
+        Fuel.PETROL, Fuel.DIESEL -> fuelPricePerLitre
+        Fuel.CNG -> cngPricePerKg
+        Fuel.LPG -> lpgPricePerLitre
+    }
+}
