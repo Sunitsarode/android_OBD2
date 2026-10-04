@@ -23,6 +23,8 @@ data class TripStats(
     val rangeKm: Float? = null,
     val cngRemainingKg: Float? = null,
     val cngRangeKm: Float? = null,
+    /** All-time and since-fill-up CNG figures, carried here so every screen can show them. */
+    val cng: CngTotals? = null,
     val cost: Float? = null,
     val costPerKm: Float? = null,
     val harshAccelerations: Int = 0,
@@ -60,6 +62,7 @@ class TripComputer {
     private var distanceKm = 0f
     private val fuelAmounts = java.util.EnumMap<Fuel, Float>(Fuel::class.java)
     private val fuelDistances = java.util.EnumMap<Fuel, Float>(Fuel::class.java)
+    private val fuelRunMs = java.util.EnumMap<Fuel, Long>(Fuel::class.java)
     private var movingMs = 0L
     private var idleMs = 0L
     private var highRpmMs = 0L
@@ -89,6 +92,7 @@ class TripComputer {
         distanceKm = 0f
         fuelAmounts.clear()
         fuelDistances.clear()
+        fuelRunMs.clear()
         movingMs = 0L
         idleMs = 0L
         highRpmMs = 0L
@@ -106,7 +110,7 @@ class TripComputer {
     }
 
     /** What one sample added: the fuel burned and the distance covered on it. */
-    class Step(val fuel: Fuel, val amount: Float, val km: Float)
+    class Step(val fuel: Fuel, val amount: Float, val km: Float, val runMs: Long)
 
     /**
      * Integrates one sample. Returns what it added, or null for the first sample
@@ -120,8 +124,7 @@ class TripComputer {
         boostKpa: Float?,
         speedFresh: Boolean,
         s: Settings,
-        cngRemainingKg: Float?,
-        cngLifetimeKmPerKg: Float?,
+        cng: CngTotals?,
         now: Long
     ): Step? {
         if (lastSample == 0L) {
@@ -139,6 +142,9 @@ class TripComputer {
         distanceKm += stepKm
         fuelDistances[fuel] = (fuelDistances[fuel] ?: 0f) + stepKm
         if (fuelPerHour != null) fuelAmounts[fuel] = (fuelAmounts[fuel] ?: 0f) + stepAmount
+        // Run time counts only while the engine turns, so a parked, connected car adds nothing.
+        val stepRunMs = if ((rpm ?: 0f) > ENGINE_RUNNING_RPM) deltaMs else 0L
+        fuelRunMs[fuel] = (fuelRunMs[fuel] ?: 0L) + stepRunMs
 
         if (speed >= 1f) movingMs += deltaMs else idleMs += deltaMs
         val highRpm = if (s.fuelSystem.primary == Fuel.DIESEL) 2500f else 3000f
@@ -154,7 +160,8 @@ class TripComputer {
         val uses = Fuel.values().mapNotNull { f ->
             val km = fuelDistances[f] ?: 0f
             val amount = fuelAmounts[f] ?: 0f
-            if (km <= 0f && amount <= 0f) null else FuelUse(f, amount, km)
+            val runMs = fuelRunMs[f] ?: 0L
+            if (km <= 0f && amount <= 0f && runMs <= 0L) null else FuelUse(f, amount, km, runMs / 1000)
         }
 
         // Priced at today's prices, so a price entered mid-trip still counts.
@@ -171,7 +178,7 @@ class TripComputer {
         val tankPer100 = s.fuelSystem.tankFuel?.let { tank -> uses.firstOrNull { it.fuel == tank }?.per100Km }
         // This trip's CNG economy once it has some distance behind it, else the long-run figure.
         val cngKmPerKg = uses.firstOrNull { it.fuel == Fuel.CNG && it.distanceKm >= 5f }
-            ?.per100Km?.let { 100f / it } ?: cngLifetimeKmPerKg
+            ?.per100Km?.let { 100f / it } ?: cng?.kmPerKg
 
         val elapsedMs = now - startedAt
         val elapsedHours = elapsedMs / 3_600_000f
@@ -190,8 +197,9 @@ class TripComputer {
             maxBoostKpa = maxBoost,
             maxPowerKw = maxPower,
             rangeKm = Metrics.rangeKm(readings, tankPer100, s),
-            cngRemainingKg = cngRemainingKg,
-            cngRangeKm = if (cngRemainingKg != null && cngKmPerKg != null) cngRemainingKg * cngKmPerKg else null,
+            cngRemainingKg = cng?.remainingKg,
+            cngRangeKm = cng?.remainingKg?.let { left -> cngKmPerKg?.let { left * it } },
+            cng = cng,
             cost = if (priced) cost else null,
             costPerKm = if (priced && distanceKm > 0.5f) cost / distanceKm else null,
             harshAccelerations = harshAccel,
@@ -199,7 +207,7 @@ class TripComputer {
             highRpmSeconds = highRpmMs / 1000,
             ecoScore = ecoScore()
         )
-        return Step(fuel, stepAmount, stepKm)
+        return Step(fuel, stepAmount, stepKm, stepRunMs)
     }
 
     /**
@@ -279,5 +287,6 @@ class TripComputer {
         /** About 0.36 g: firmer than any planned stop. */
         const val HARSH_BRAKE_MS2 = 3.5f
         const val MIN_RECORD_KM = 0.2f
+        const val ENGINE_RUNNING_RPM = 300f
     }
 }

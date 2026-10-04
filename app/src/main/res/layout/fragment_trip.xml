@@ -29,6 +29,38 @@
             android:text="Log CNG fill-up"
             android:visibility="gone" />
 
+        <LinearLayout
+            android:id="@+id/cngTotalsHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                style="@style/SettingSection"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="0dp"
+                android:text="CNG totals, all drives" />
+
+            <Button
+                android:id="@+id/resetCngTotals"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Reset" />
+        </LinearLayout>
+
+        <GridLayout
+            android:id="@+id/cngGrid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:columnCount="3"
+            android:visibility="gone" />
+
         <TextView
             style="@style/SettingSection"
             android:text="Performance timers" />

@@ -26,7 +26,9 @@ object ObdRepository {
         object ResetTrip : Task()
         object ResetPerf : Task()
         object ResetGears : Task()
-        data class CngFilled(val kg: Float) : Task()
+        object ResetCngTotals : Task()
+        /** [levelKg] is the cylinder after filling; [filledKg] is the receipt amount, if entered. */
+        data class CngFilled(val levelKg: Float, val filledKg: Float?) : Task()
         data class Raw(val command: String) : Task()
     }
 
@@ -134,6 +136,14 @@ object ObdRepository {
     @Volatile
     var phoneDashboardVisible = false
 
+    /** Connection drops since the app started, for the console's health line. */
+    @Volatile
+    var reconnects = 0
+
+    /** Adapter replies that never arrived in the current connection. */
+    @Volatile
+    var adapterTimeouts = 0L
+
     // --- console: a bounded ring buffer the console screen polls, never a flow ---
 
     private const val CONSOLE_LIMIT = 400
@@ -147,11 +157,19 @@ object ObdRepository {
     fun trace(line: String) {
         val trimmed = line.trim()
         if (trimmed.isEmpty()) return
+        val stamped = clock() + " " + trimmed
         synchronized(consoleLock) {
             if (consoleLines.size >= CONSOLE_LIMIT) consoleLines.removeFirst()
-            consoleLines.addLast(trimmed)
+            consoleLines.addLast(stamped)
         }
         consoleCounter.incrementAndGet()
+    }
+
+    /** Local time as HH:mm:ss, so a shared log shows when each drop happened. */
+    private fun clock(): String {
+        val now = System.currentTimeMillis()
+        val local = (now + java.util.TimeZone.getDefault().getOffset(now)) / 1000 % 86_400
+        return "%02d:%02d:%02d".format(local / 3600, local / 60 % 60, local % 60)
     }
 
     fun consoleSnapshot(): List<String> = synchronized(consoleLock) { consoleLines.toList() }

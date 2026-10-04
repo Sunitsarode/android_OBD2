@@ -58,6 +58,7 @@ class TripHistory(context: Context) {
                     put("fuel", use.fuel.name)
                     put("amount", use.amount.toDouble())
                     put("km", use.distanceKm.toDouble())
+                    put("seconds", use.runSeconds)
                 })
             }
         })
@@ -87,7 +88,12 @@ class TripHistory(context: Context) {
             return (0 until array.length()).mapNotNull { i ->
                 val item = array.optJSONObject(i) ?: return@mapNotNull null
                 val fuel = runCatching { Fuel.valueOf(item.optString("fuel")) }.getOrNull() ?: return@mapNotNull null
-                FuelUse(fuel, item.optDouble("amount", 0.0).toFloat(), item.optDouble("km", 0.0).toFloat())
+                FuelUse(
+                    fuel,
+                    item.optDouble("amount", 0.0).toFloat(),
+                    item.optDouble("km", 0.0).toFloat(),
+                    item.optLong("seconds", 0L)
+                )
             }
         }
         val litres = o.optDouble("fuel", 0.0).toFloat()

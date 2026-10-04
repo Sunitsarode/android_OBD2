@@ -65,6 +65,29 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
         return reply
     }
 
+    /** Replies that never arrived, for diagnostics. */
+    var timeouts: Long = 0L
+        private set
+    private var consecutiveTimeouts = 0
+
+    /**
+     * Like [send], but a missed reply means "no answer this time" rather than a
+     * lost connection. Clone adapters drop a prompt now and then under steady
+     * polling; treating that as a dead link made the app reconnect every few
+     * seconds. Several misses in a row do mean the adapter is gone.
+     */
+    private fun ask(command: String, timeoutMs: Long = DEFAULT_TIMEOUT, quiet: Boolean = false): String? = try {
+        val reply = send(command, timeoutMs, quiet)
+        consecutiveTimeouts = 0
+        reply
+    } catch (e: ObdSocket.ReplyTimeoutException) {
+        timeouts++
+        consecutiveTimeouts++
+        trace("!! no reply to " + command + " (" + consecutiveTimeouts + " in a row)")
+        if (consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) throw java.io.IOException("Adapter stopped replying", e)
+        null
+    }
+
     /**
      * Runs the configuration sequence. Passing a previously detected [preferred]
      * protocol skips the slow auto-detect on reconnects.
@@ -113,21 +136,21 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
         if (protocol == "6" || protocol == "8") tryTargetEcm(supported, fastPids)
         if (ecmTargeted && readsCleanly("010C1", 0x0C, 2)) countSuffix = true
 
-        val probe = send("010C0D" + (if (countSuffix) "1" else ""))
+        val probe = ask("010C0D" + (if (countSuffix) "1" else "")) ?: ""
         val parsed = ObdResponse.multiPid(probe, mapOf(0x0C to 2, 0x0D to 1))
         batching = parsed.containsKey(0x0C) && parsed.containsKey(0x0D)
         trace("-- polling mode: " + modeLabel)
     }
 
     private fun tryTargetEcm(supported: Set<Int>, fastPids: Set<Int>) {
-        if (!send("ATSH7E0").uppercase().contains("OK")) return
+        if (ask("ATSH7E0")?.uppercase()?.contains("OK") != true) return
         headerIsEcm = true
         val ecmPids = discoverSupportedPids()
         val others = supported - ecmPids
         // A fast PID living in another module would need broadcasting every cycle,
         // which costs more than targeting saves.
         if (ecmPids.isEmpty() || others.any { it in fastPids }) {
-            send("ATSH7DF")
+            ask("ATSH7DF")
             headerIsEcm = false
             return
         }
@@ -137,7 +160,7 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
 
     /** Returns to plain broadcast polling with no speedups. */
     fun resetToSafeMode(quiet: Boolean = false) {
-        if (headerIsEcm) send("ATSH7DF", quiet = quiet)
+        if (headerIsEcm) ask("ATSH7DF", quiet = quiet)
         headerIsEcm = false
         ecmTargeted = false
         countSuffix = false
@@ -148,7 +171,7 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
     }
 
     private fun readsCleanly(command: String, pid: Int, len: Int): Boolean {
-        val reply = send(command)
+        val reply = ask(command) ?: return false
         return ObdResponse.errorOf(reply) == null && ObdResponse.dataFor(0x01, pid, len, reply) != null
     }
 
@@ -185,7 +208,7 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
 
     private fun readSingle(pid: Pids.Pid): Float? {
         val suffix = if (countSuffix && headerIsEcm && pid.len <= SINGLE_FRAME_MAX_LEN) "1" else ""
-        val reply = send("01" + pid.hex + suffix, DEFAULT_TIMEOUT, quietPolling)
+        val reply = ask("01" + pid.hex + suffix, DEFAULT_TIMEOUT, quietPolling) ?: return null
         if (ObdResponse.errorOf(reply) != null) return null
         val data = ObdResponse.dataFor(0x01, pid.id, pid.len, reply) ?: return null
         return decode(pid, data)
@@ -193,7 +216,8 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
 
     private fun readBatch(batch: List<Pids.Pid>): Map<Int, Float> {
         val suffix = if (countSuffix && headerIsEcm) "1" else ""
-        val reply = send("01" + batch.joinToString("") { it.hex } + suffix, DEFAULT_TIMEOUT, quietPolling)
+        val reply = ask("01" + batch.joinToString("") { it.hex } + suffix, DEFAULT_TIMEOUT, quietPolling)
+            ?: return emptyMap()
         if (ObdResponse.errorOf(reply) != null) return emptyMap()
         val out = HashMap<Int, Float>()
         for ((id, data) in ObdResponse.multiPid(reply, batch.associate { it.id to it.len })) {
@@ -204,8 +228,8 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
     }
 
     private fun readFromOtherEcu(pid: Pids.Pid): Float? = broadcast {
-        val reply = send("01" + pid.hex, DEFAULT_TIMEOUT, quietPolling)
-        if (ObdResponse.errorOf(reply) != null) null
+        val reply = ask("01" + pid.hex, DEFAULT_TIMEOUT, quietPolling)
+        if (reply == null || ObdResponse.errorOf(reply) != null) null
         else ObdResponse.dataFor(0x01, pid.id, pid.len, reply)?.let { decode(pid, it) }
     }
 
@@ -254,12 +278,12 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
     /** Runs [block] with broadcast addressing so every module can answer. */
     private inline fun <T> broadcast(block: () -> T): T {
         if (!headerIsEcm) return block()
-        send("ATSH7DF", quiet = quietPolling)
+        ask("ATSH7DF", quiet = quietPolling)
         headerIsEcm = false
         try {
             return block()
         } finally {
-            send("ATSH7E0", quiet = quietPolling)
+            ask("ATSH7E0", quiet = quietPolling)
             headerIsEcm = true
         }
     }
@@ -268,7 +292,7 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
     fun discoverSupportedPids(): Set<Int> {
         val supported = LinkedHashSet<Int>()
         for (base in SUPPORT_BASES) {
-            val reply = send("01" + "%02X".format(base))
+            val reply = ask("01" + "%02X".format(base)) ?: break
             if (ObdResponse.errorOf(reply) != null) break
             val masks = ObdResponse.allDataFor(0x01, base, 4, reply)
             if (masks.isEmpty()) break
@@ -282,7 +306,7 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
 
     /** True once the ECU answers again after the ignition was off. */
     fun ecuResponds(): Boolean {
-        val reply = send("0100", 4000, quiet = true)
+        val reply = ask("0100", 4000, quiet = true) ?: return false
         return ObdResponse.errorOf(reply) == null && ObdResponse.dataFor(0x01, 0x00, 4, reply) != null
     }
 
@@ -291,7 +315,7 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
      * from the first reply, which on CAN is the engine ECU.
      */
     fun readStatus(): Dtc.Status? {
-        val reply = send("0101", DEFAULT_TIMEOUT, quietPolling)
+        val reply = ask("0101", DEFAULT_TIMEOUT, quietPolling) ?: return null
         if (ObdResponse.errorOf(reply) != null) return null
         val all = ObdResponse.allDataFor(0x01, 0x01, 4, reply).mapNotNull { Dtc.decodeStatus(it) }
         if (all.isEmpty()) return null
@@ -308,7 +332,7 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
     }
 
     private fun readDtcs(mode: String, kind: Dtc.Kind): List<Dtc.Entry> {
-        val reply = send(mode, LONG_TIMEOUT)
+        val reply = ask(mode, LONG_TIMEOUT) ?: return emptyList()
         // NO DATA is the normal answer when nothing is stored.
         if (ObdResponse.errorOf(reply) != null) return emptyList()
         return ObdResponse.bodiesFor(mode.toInt(16), reply).flatMap { Dtc.parse(it, kind) }
@@ -316,14 +340,18 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
 
     /** Clears codes and freeze frames in every module, and turns off the MIL. */
     fun clearDtcs(): Boolean = broadcast {
-        val reply = send("04", LONG_TIMEOUT)
-        ObdResponse.errorOf(reply) == null && ObdResponse.messages(reply).any { it.startsWith("44") }
+        val reply = ask("04", LONG_TIMEOUT)
+        reply != null && ObdResponse.errorOf(reply) == null && ObdResponse.messages(reply).any { it.startsWith("44") }
     }
 
     /** The snapshot of conditions the ECU stored alongside its first trouble code. */
     fun readFreezeFrame(): Dtc.FreezeFrame? = broadcast {
-        val dtcReply = send("020200", LONG_TIMEOUT)
-        val dtcBytes = if (ObdResponse.errorOf(dtcReply) == null) ObdResponse.freezeFrameData(0x02, 2, dtcReply) else null
+        val dtcReply = ask("020200", LONG_TIMEOUT)
+        val dtcBytes = if (dtcReply != null && ObdResponse.errorOf(dtcReply) == null) {
+            ObdResponse.freezeFrameData(0x02, 2, dtcReply)
+        } else {
+            null
+        }
         val code = dtcBytes?.let { if (it[0] == 0 && it[1] == 0) null else Dtc.decodeCode(it[0], it[1]) }
         if (code == null) {
             null
@@ -331,7 +359,7 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
             val values = LinkedHashMap<Int, Float>()
             for (id in FREEZE_FRAME_PIDS) {
                 val pid = Pids.BY_ID[id] ?: continue
-                val reply = send("02" + pid.hex + "00")
+                val reply = ask("02" + pid.hex + "00") ?: continue
                 if (ObdResponse.errorOf(reply) != null) continue
                 val data = ObdResponse.freezeFrameData(id, pid.len, reply) ?: continue
                 decode(pid, data)?.let { values[id] = it }
@@ -351,7 +379,7 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
      * send numbered four-byte lines that have to be put back in order.
      */
     private fun readMode09Ascii(pid: Int, length: Int): String? {
-        val reply = send("09" + "%02X".format(pid), LONG_TIMEOUT)
+        val reply = ask("09" + "%02X".format(pid), LONG_TIMEOUT) ?: return null
         if (ObdResponse.errorOf(reply) != null) return null
         val marker = "49" + "%02X".format(pid)
         val parts = ObdResponse.messages(reply).filter { it.startsWith(marker) }.map { it.substring(marker.length) }
@@ -372,7 +400,7 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
 
     /** Adapter-measured battery voltage. Works even when the ECU is asleep. */
     fun readBatteryVoltage(): Float? {
-        val reply = send("ATRV", 3000, quietPolling)
+        val reply = ask("ATRV", 3000, quietPolling) ?: return null
         return reply.replace('\r', ' ').trim().removeSuffix("V").trim().toFloatOrNull()
     }
 
@@ -381,17 +409,17 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
      * depends on, in case the command changed or reset them.
      */
     fun sendRaw(command: String) {
-        send(command, 5000)
+        ask(command, 5000)
         val cmd = command.uppercase().replace(" ", "")
         if (!cmd.startsWith("AT")) return
         if (cmd == "ATZ" || cmd == "ATD" || cmd == "ATWS") {
             Thread.sleep(1000)
             applyFormatting()
-            send("ATSP" + (protocol ?: "0"))
+            ask("ATSP" + (protocol ?: "0"))
         } else {
             applyFormatting()
         }
-        if (headerIsEcm) send("ATSH7E0")
+        if (headerIsEcm) ask("ATSH7E0")
     }
 
     fun close() = socket.close()
@@ -409,6 +437,7 @@ class Elm327(private val socket: ObdSocket, private val trace: (String) -> Unit)
         private const val SINGLE_FRAME_MAX_LEN = 5
         private const val MAX_BATCH_LEN = 4
         private const val BATCH_STRIKES = 2
+        private const val MAX_CONSECUTIVE_TIMEOUTS = 4
 
         private val CAN_PROTOCOLS = setOf("6", "7", "8", "9", "A", "B", "C")
         private val SUPPORT_BASES = intArrayOf(0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0)

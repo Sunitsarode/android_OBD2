@@ -65,8 +65,8 @@ object FuelSelector {
     }
 }
 
-/** One fuel's share of a trip. [amount] is litres, or kg for CNG. */
-data class FuelUse(val fuel: Fuel, val amount: Float, val distanceKm: Float) {
+/** One fuel's share of a trip. [amount] is litres, or kg for CNG; [runSeconds] is engine time on it. */
+data class FuelUse(val fuel: Fuel, val amount: Float, val distanceKm: Float, val runSeconds: Long = 0L) {
 
     /** Litres or kg per 100 km, once there is enough distance to mean anything. */
     val per100Km: Float? get() = if (distanceKm >= 0.5f && amount > 0f) amount / distanceKm * 100f else null

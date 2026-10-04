@@ -31,10 +31,25 @@
             android:textIsSelectable="true" />
     </ScrollView>
 
-    <CheckBox
-        android:id="@+id/verbose"
-        style="@style/SettingCheck"
-        android:text="Show live polling traffic (slows weak head units)" />
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <CheckBox
+            android:id="@+id/verbose"
+            style="@style/SettingCheck"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:text="Show live polling traffic" />
+
+        <Button
+            android:id="@+id/copyLog"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Copy log" />
+    </LinearLayout>
 
     <LinearLayout
         android:layout_width="match_parent"

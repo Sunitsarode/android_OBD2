@@ -15,6 +15,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.obd2dash.R
+import com.obd2dash.core.CngTotals
+import com.obd2dash.core.CngTracker
+import com.obd2dash.core.Fuel
 import com.obd2dash.core.FuelSystem
 import com.obd2dash.core.ObdRepository
 import com.obd2dash.core.PerfResults
@@ -49,6 +52,13 @@ class TripFragment : LiveFragment() {
     private var tripSpecs: List<TripTile> = emptyList()
     private var builtFor: FuelSystem? = null
     private var settings: Settings? = null
+    private val cngTiles = ArrayList<TileView>()
+
+    private val cngLabels = listOf(
+        "TOTAL CNG USED", "TOTAL CNG DISTANCE", "AVG CNG MILEAGE",
+        "TOTAL CNG RUN TIME", "FILL-UP MILEAGE", "SINCE FILL: TIME",
+        "SINCE FILL: DISTANCE", "SINCE FILL: CNG USED", "SINCE FILL: MILEAGE"
+    )
 
     private val perfLabels = listOf(
         "0-60 KM/H", "0-100 KM/H", "60-100 KM/H", "1/4 MILE", "TRAP SPEED", "100-0 BRAKING"
@@ -67,6 +77,8 @@ class TripFragment : LiveFragment() {
 
         fill(b.perfGrid, perfLabels, perfTiles)
         b.fillCng.setOnClickListener { logCngFill() }
+        fill(b.cngGrid, cngLabels, cngTiles)
+        b.resetCngTotals.setOnClickListener { confirmResetCngTotals() }
 
         b.resetTrip.setOnClickListener {
             if (ObdRepository.connectionState.value != ObdRepository.ConnState.CONNECTED) {
@@ -98,7 +110,10 @@ class TripFragment : LiveFragment() {
             tripSpecs = tripTiles(s)
             fill(b.tripGrid, tripSpecs.map { it.label }, tripTiles)
         }
-        b.fillCng.visibility = if (s.fuelSystem.usesCng) View.VISIBLE else View.GONE
+        val cngVisibility = if (s.fuelSystem.usesCng) View.VISIBLE else View.GONE
+        b.fillCng.visibility = cngVisibility
+        b.cngTotalsHeader.visibility = cngVisibility
+        b.cngGrid.visibility = cngVisibility
         onShown()
     }
 
@@ -145,11 +160,12 @@ class TripFragment : LiveFragment() {
         for (fuel in listOfNotNull(system.secondary, system.primary)) {
             val name = if (bi) fuel.label.uppercase() + " " else "FUEL "
             tiles += TripTile(name + "USED") { t, st -> Format.amount(t.use(fuel)?.amount ?: 0f, fuel, st.imperial) }
-            tiles += TripTile(if (bi) name + "ECONOMY" else "ECONOMY") { t, st -> Format.economy(t.use(fuel)?.per100Km, fuel, st) }
+            tiles += TripTile(if (bi) name + "MILEAGE" else "MILEAGE") { t, st -> Format.economy(t.use(fuel)?.per100Km, fuel, st) }
             if (bi) {
                 tiles += TripTile(name + "DISTANCE") { t, st ->
                     Format.distance(t.use(fuel)?.distanceKm ?: 0f, st.imperial) to Format.distanceUnit(st.imperial)
                 }
+                tiles += TripTile(name + "RUN TIME") { t, _ -> Format.runTime(t.use(fuel)?.runSeconds ?: 0L) to "" }
             }
         }
         if (system.usesCng) {
@@ -179,7 +195,44 @@ class TripFragment : LiveFragment() {
             val (value, unit) = spec.value(t, s)
             tripTiles.getOrNull(index)?.setValue(if (value == "--") null else value, unit)
         }
+        if (s.fuelSystem.usesCng) renderCngTotals(t.cng ?: CngTracker(prefs).totals(), s)
     }
+
+    /** All-time CNG figures, plus the stretch since the last logged fill-up. */
+    private fun renderCngTotals(c: CngTotals, s: Settings) {
+        val imp = s.imperial
+        val dist = Format.distanceUnit(imp)
+        val values: List<Pair<String, String>> = listOf(
+            Format.amount(c.usedKg, Fuel.CNG, imp),
+            Format.distance(c.distanceKm, imp) to dist,
+            Format.economy(c.kmPerKg?.let { 100f / it }, Fuel.CNG, s),
+            Format.runTime(c.runSeconds) to "",
+            Format.economy(c.lastFillKmPerKg?.let { 100f / it }, Fuel.CNG, s),
+            Format.runTime(c.sinceFillSeconds) to "",
+            Format.distance(c.sinceFillKm, imp) to dist,
+            Format.amount(c.sinceFillKg, Fuel.CNG, imp),
+            Format.economy(c.sinceFillKmPerKg?.let { 100f / it }, Fuel.CNG, s)
+        )
+        values.forEachIndexed { index, (value, unit) ->
+            cngTiles.getOrNull(index)?.setValue(if (value == "--") null else value, unit)
+        }
+    }
+
+    private fun confirmResetCngTotals() {
+        AlertDialog.Builder(requireContext())
+            .setTitle("Reset CNG totals?")
+            .setMessage("All-time CNG used, distance and run time go back to zero. The cylinder level and fill-up figures stay.")
+            .setPositiveButton("Reset") { _, _ ->
+                if (serviceRunning()) ObdRepository.submit(ObdRepository.Task.ResetCngTotals)
+                else CngTracker(prefs).resetTotals()
+                onShown()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** While polling runs, the service owns the CNG count; otherwise settings change directly. */
+    private fun serviceRunning() = ObdRepository.connectionState.value != ObdRepository.ConnState.DISCONNECTED
 
     /**
      * Pump receipts show the kg dispensed, so a top-up adds to what is left.
@@ -196,22 +249,25 @@ class TripFragment : LiveFragment() {
         val known = current?.let { "About %.1f kg was left. ".format(it) } ?: ""
         AlertDialog.Builder(context)
             .setTitle("CNG fill-up")
-            .setMessage(known + "Enter the kg filled, or tap Full cylinder (" + Format.num(s.cngCapacityKg, 1) + " kg).")
+            .setMessage(
+                known + "Enter the kg on the receipt; that also measures your real mileage since the last fill. " +
+                        "Or tap Full cylinder (" + Format.num(s.cngCapacityKg, 1) + " kg)."
+            )
             .setView(input)
             .setPositiveButton("Add") { _, _ ->
                 val added = input.text.toString().trim().toFloatOrNull() ?: return@setPositiveButton
-                recordCngLevel(((current ?: 0f) + added).coerceAtMost(s.cngCapacityKg))
+                recordCngLevel(((current ?: 0f) + added).coerceAtMost(s.cngCapacityKg), added)
             }
-            .setNeutralButton("Full cylinder") { _, _ -> recordCngLevel(s.cngCapacityKg) }
+            .setNeutralButton("Full cylinder") { _, _ -> recordCngLevel(s.cngCapacityKg, null) }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun recordCngLevel(kg: Float) {
-        prefs.cngRemainingKg = kg
-        // The service keeps its own running count, so it must hear about the fill too.
-        ObdRepository.submit(ObdRepository.Task.CngFilled(kg))
-        Toast.makeText(requireContext(), "CNG level set to %.1f kg".format(kg), Toast.LENGTH_SHORT).show()
+    private fun recordCngLevel(levelKg: Float, filledKg: Float?) {
+        if (serviceRunning()) ObdRepository.submit(ObdRepository.Task.CngFilled(levelKg, filledKg))
+        else CngTracker(prefs).refill(levelKg, filledKg)
+        Toast.makeText(requireContext(), "CNG level set to %.1f kg".format(levelKg), Toast.LENGTH_SHORT).show()
+        onShown()
     }
 
     private fun renderPerf(r: PerfResults) {
@@ -301,6 +357,7 @@ class TripFragment : LiveFragment() {
         binding = null
         tripTiles.clear()
         perfTiles.clear()
+        cngTiles.clear()
     }
 
     private companion object {

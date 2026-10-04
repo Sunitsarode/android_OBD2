@@ -37,9 +37,9 @@ object DashMetrics {
 
     /** CNG cars lead with fuel: the car screen shows the first four tiles. */
     private val CNG_DEFAULT_KEYS = listOf(
-        "fuel", "consumption", "cngleft", "range",
-        "pid:05", "avgecon", "pid:04", "pid:11",
-        "tripcost", "battery", "pid:2F", "tripdist"
+        "fuel", "cngmileage", "cngleft", "cngtime",
+        "pid:05", "consumption", "cngtotal", "cngrange",
+        "tripcost", "battery", "cngfillmileage", "tripdist"
     )
 
     fun defaultKeys(s: Settings): List<String> = if (s.fuelSystem.usesCng) CNG_DEFAULT_KEYS else DEFAULT_KEYS
@@ -67,6 +67,20 @@ object DashMetrics {
             { i -> i.settings.lowCngKg > 0f && (i.trip.cngRemainingKg ?: 99f) < i.settings.lowCngKg }),
         Metric("cngrange", "CNG RANGE", { i ->
             v(Format.distance(i.trip.cngRangeKm, i.settings.imperial)) to Format.distanceUnit(i.settings.imperial)
+        }),
+        Metric("cngmileage", "CNG MILEAGE", { i ->
+            // This trip's km/kg, or the all-time average before the trip has any CNG distance.
+            val per100 = i.trip.use(Fuel.CNG)?.per100Km ?: i.trip.cng?.kmPerKg?.let { 100f / it }
+            pair(Format.economy(per100, Fuel.CNG, i.settings))
+        }),
+        Metric("cngused", "CNG USED", { i ->
+            pair(Format.amount(i.trip.use(Fuel.CNG)?.amount ?: 0f, Fuel.CNG, i.settings.imperial))
+        }),
+        Metric("cngtime", "CNG RUN TIME", { i -> Format.runTime(i.trip.use(Fuel.CNG)?.runSeconds ?: 0L) to "" }),
+        Metric("cngtotal", "TOTAL CNG USED", { i -> pair(Format.amount(i.trip.cng?.usedKg, Fuel.CNG, i.settings.imperial)) }),
+        Metric("cngtotaltime", "TOTAL CNG TIME", { i -> v(Format.runTime(i.trip.cng?.runSeconds)) to "" }),
+        Metric("cngfillmileage", "FILL-UP MILEAGE", { i ->
+            pair(Format.economy(i.trip.cng?.lastFillKmPerKg?.let { 100f / it }, Fuel.CNG, i.settings))
         }),
         Metric("boost", "BOOST / VACUUM", { i ->
             v(Format.pressure(i.live.derived.boostKpa, i.settings.imperial)) to Format.pressureUnit(i.settings.imperial)

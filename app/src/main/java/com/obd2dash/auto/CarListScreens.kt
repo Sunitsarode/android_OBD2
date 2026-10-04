@@ -15,6 +15,7 @@ import androidx.car.app.versioning.CarAppApiLevels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.obd2dash.core.Fuel
 import com.obd2dash.core.ObdRepository
 import com.obd2dash.core.Prefs
 import com.obd2dash.obd.Pids
@@ -108,33 +109,56 @@ class TripScreen(carContext: CarContext) : LiveListScreen(carContext, ObdReposit
         val s = prefs.snapshot()
         val imp = s.imperial
         val dist = Format.distanceUnit(imp)
+        val rows = ArrayList<Row>()
 
-        // One fuel row per fuel burned; a bi-fuel trip has both.
-        val fuelText = t.fuelUse.joinToString("; ") { use ->
+        // Per fuel this trip: amount, mileage, and engine time on it. CNG leads on a CNG car.
+        val uses = t.fuelUse.sortedBy { if (it.fuel == Fuel.CNG) 0 else 1 }
+        for (use in uses) {
             val (amount, amountUnit) = Format.amount(use.amount, use.fuel, imp)
-            val (economy, economyUnit) = Format.economy(use.per100Km, use.fuel, s)
-            use.fuel.label + " " + amount + " " + amountUnit + ", " + economy + " " + economyUnit
-        }.ifEmpty { "Nothing burned yet" }
+            val (mileage, mileageUnit) = Format.economy(use.per100Km, use.fuel, s)
+            rows += row(
+                use.fuel.label + " this trip",
+                amount + " " + amountUnit + "  \u00B7  " + mileage + " " + mileageUnit +
+                        "  \u00B7  run " + Format.runTime(use.runSeconds)
+            )
+        }
+        if (uses.isEmpty()) rows += row("Fuel this trip", "Nothing burned yet")
 
-        val rangeText = listOfNotNull(
-            t.cngRangeKm?.let { "CNG " + Format.distance(it, imp) + " " + dist },
-            t.cngRemainingKg?.let { "(" + Format.num(it, 1) + " kg left)" },
-            t.rangeKm?.let { (s.fuelSystem.tankFuel?.label ?: "Tank") + " " + Format.distance(it, imp) + " " + dist }
-        ).joinToString(" ").ifEmpty {
-            if (s.fuelSystem.usesCng) "Log a CNG fill-up on the phone's Trip tab" else "--"
+        if (s.fuelSystem.usesCng) {
+            val c = t.cng
+            rows += row(
+                "CNG left (estimated)",
+                if (t.cngRemainingKg == null) "Log a fill-up on the phone's Trip tab"
+                else Format.num(t.cngRemainingKg, 1) + " kg  \u00B7  range " + Format.distance(t.cngRangeKm, imp) + " " + dist
+            )
+            if (c != null) {
+                val (avg, avgUnit) = Format.economy(c.kmPerKg?.let { 100f / it }, Fuel.CNG, s)
+                rows += row(
+                    "CNG totals",
+                    Format.num(c.usedKg, 1) + " kg  \u00B7  " + Format.distance(c.distanceKm, imp) + " " + dist +
+                            "  \u00B7  " + avg + " " + avgUnit + "  \u00B7  run " + Format.runTime(c.runSeconds)
+                )
+                val (fillMileage, fillUnit) = Format.economy(c.lastFillKmPerKg?.let { 100f / it }, Fuel.CNG, s)
+                rows += row(
+                    "Since fill-up",
+                    Format.distance(c.sinceFillKm, imp) + " " + dist + "  \u00B7  " + Format.num(c.sinceFillKg, 1) +
+                            " kg  \u00B7  last fill " + fillMileage + " " + fillUnit
+                )
+            }
         }
 
-        val rows = listOf(
-            row("Distance", Format.distance(t.distanceKm, imp) + " " + dist + " in " + Format.duration(t.elapsedSeconds) +
-                    " (idle " + Format.duration(t.idleSeconds) + ")"),
-            row("Fuel", fuelText),
-            row("Cost", if (t.cost == null) "Set fuel prices in the phone app's Settings"
-                else Format.money(t.cost) + " (" + Format.money(t.costPerKm) + " per km)"),
-            row("Range", rangeText),
-            row("Driving", "Eco score " + (t.ecoScore?.toString() ?: "--") + ", " + t.harshAccelerations +
-                    " harsh accel, " + t.harshBrakings + " harsh brake"),
-            row("Speed", "Average " + Format.speed(t.avgSpeedKmh, imp) + ", max " + Format.speed(t.maxSpeedKmh, imp) +
-                    " " + Format.speedUnit(imp))
+        rows += row(
+            "Distance",
+            Format.distance(t.distanceKm, imp) + " " + dist + " in " + Format.duration(t.elapsedSeconds) +
+                    (if (t.cost != null) "  \u00B7  " + Format.money(t.cost) else "")
+        )
+        if (!s.fuelSystem.usesCng) {
+            rows += row("Range", t.rangeKm?.let { Format.distance(it, imp) + " " + dist } ?: "--")
+        }
+        rows += row(
+            "Driving",
+            "Eco score " + (t.ecoScore?.toString() ?: "--") + "  \u00B7  " + t.harshAccelerations +
+                    " harsh accel  \u00B7  " + t.harshBrakings + " harsh brake"
         )
         return list("Trip", rows, "No trip yet")
     }

@@ -1,6 +1,11 @@
 package com.obd2dash.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -36,6 +41,7 @@ class ConsoleFragment : LiveFragment() {
         val b = binding ?: return
         b.sendCommand.setOnClickListener { send() }
         b.clearConsole.setOnClickListener { ObdRepository.clearConsole() }
+        b.copyLog.setOnClickListener { copyLog() }
         b.commandInput.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND) {
                 send()
@@ -64,13 +70,43 @@ class ConsoleFragment : LiveFragment() {
 
     private fun refresh() {
         val b = binding ?: return
-        val mode = ObdRepository.pollMode.value
-        b.pollModeText.text = if (mode.isEmpty()) "Not connected" else "Polling mode: " + mode
+        b.pollModeText.text = healthLine()
         val version = ObdRepository.consoleVersion
         if (version == shownVersion) return
         shownVersion = version
         b.consoleText.text = ObdRepository.consoleSnapshot().joinToString("\n")
         b.consoleScroll.post { b.consoleScroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    /** One line that says whether the link is healthy: missed replies and drops are the tell. */
+    private fun healthLine(): String {
+        val mode = ObdRepository.pollMode.value
+        if (mode.isEmpty()) return "Not connected"
+        return "Polling: " + mode + "   |   missed replies: " + ObdRepository.adapterTimeouts +
+                "   |   reconnects: " + ObdRepository.reconnects
+    }
+
+    /** Copies the log with enough context to diagnose a problem from it alone. */
+    private fun copyLog() {
+        val context = requireContext()
+        val version = try {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        } catch (_: Exception) {
+            "?"
+        }
+        val info = ObdRepository.vehicleInfo.value
+        val header = listOf(
+            "OBD2 Dashboard " + version + " on Android " + Build.VERSION.RELEASE + " (" + Build.MANUFACTURER + " " + Build.MODEL + ")",
+            "Adapter: " + (info.adapterId ?: "?") + "   Protocol: " + (info.protocol ?: "?"),
+            "Status: " + ObdRepository.statusMessage.value,
+            healthLine(),
+            ""
+        )
+        val text = (header + ObdRepository.consoleSnapshot()).joinToString(NEWLINE)
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("OBD2 Dashboard log", text))
+        Toast.makeText(context, "Log copied. Paste it into a message to share it.", Toast.LENGTH_LONG).show()
     }
 
     private fun send() {
@@ -88,5 +124,6 @@ class ConsoleFragment : LiveFragment() {
 
     private companion object {
         const val REFRESH_MS = 300L
+        val NEWLINE: String = System.lineSeparator()
     }
 }

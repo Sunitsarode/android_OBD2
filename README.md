@@ -84,6 +84,18 @@ Set **Fuel system** in Settings to *Petrol + CNG* (or *CNG only*, *Petrol + LPG*
   air-to-fuel ratio), so economy shows as **km/kg** and cost uses the
   **price per kg**. Petrol stays in km/L. A bi-fuel trip tracks the two
   separately: used, economy, and distance on each.
+- **No fuel report from the ECU?** Many cars, Maruti included, do not report
+  which fuel is burning. The app then assumes CNG on a Petrol + CNG car, since that
+  is where it spends nearly all its time; tap the badge when you switch to petrol.
+  If the ECU does report CNG while Settings still says Petrol, the app switches the
+  fuel system to Petrol + CNG by itself.
+- **CNG mileage, totals and run time.** The Trip tab shows this trip's CNG and
+  petrol separately (used, mileage, distance, engine run time) and a **CNG totals**
+  section across all drives: total CNG used, total distance on CNG, average km/kg,
+  and total CNG run time, plus the same since your last fill-up.
+- **Measured mileage.** When you log a fill-up with the kg from the receipt, the app
+  divides the km driven since the previous fill by it: the real km/kg, independent
+  of the live estimate. This assumes both fills went to full, as CNG stations fill.
 - **CNG left and range.** OBD has no CNG gauge, so the app counts down from
   your last fill-up. Tap **Log CNG fill-up** on the Trip tab and enter the kg
   from the receipt (it adds to what is left), or **Full cylinder**. Range uses
@@ -98,6 +110,15 @@ Set **Fuel system** in Settings to *Petrol + CNG* (or *CNG only*, *Petrol + LPG*
 
 Economy is shown as km/L and km/kg by default; switch to L/100km and kg/100km
 in Settings.
+
+## Connection stability
+
+Clone ELM327 adapters miss a reply now and then. A missed reply costs one reading,
+not the connection: the app resyncs the adapter and carries on, and only several
+misses in a row count as a lost link. The ignition is only treated as off after six
+seconds of silence **and** two failed direct checks of the ECU. If the speedups below
+stop working on your adapter, the app switches to standard polling and remembers that
+for the adapter. Reconnecting after a real drop starts in under a second.
 
 ## Faster polling
 
@@ -151,7 +172,9 @@ built to cause as little friction as possible:
 
 ### One-time setup
 
-Android Auto only lists apps from the Play Store unless you allow unknown sources:
+Android Auto only lists apps from the Play Store unless you allow unknown sources.
+**Settings > Android Auto (car screen)** in the phone app shows these steps and has
+a button that opens Android Auto's settings directly:
 
 1. On the phone, open **Settings > Connected devices > Connection preferences > Android Auto**
    (or search Settings for "Android Auto").
@@ -266,6 +289,8 @@ efficiency and will drift from reality under load.
 
 | Symptom | Likely cause |
 | --- | --- |
+| Connection keeps dropping | Open the **Console** tab: the top line counts missed replies and reconnects. Tap **Copy log** and send the text for diagnosis. Turning off **Fast polling** in Settings often helps with clone adapters |
+| App not on the car screen | Android Auto hides sideloaded apps until **Unknown sources** is on; see Settings > Android Auto |
 | "No response from vehicle ECU" | Ignition off, or the adapter is not seated fully in the port |
 | Connects then drops repeatedly | Clone adapter with a flaky SPP stack; try a different one |
 | Very few PIDs listed | Normal - most cars support 20-40 of the standard PIDs |

@@ -24,6 +24,7 @@ import com.obd2dash.core.CsvLogger
 import com.obd2dash.core.Fuel
 import com.obd2dash.core.FuelDetection
 import com.obd2dash.core.FuelSelector
+import com.obd2dash.core.FuelSystem
 import com.obd2dash.core.GearEstimator
 import com.obd2dash.core.GearReading
 import com.obd2dash.core.Metrics
@@ -90,6 +91,7 @@ class ObdService : Service() {
     private var lastGear = GearReading.UNKNOWN
     private var lastGearFlushAt = 0L
     private var lastNotifyAt = 0L
+    private var cngAutoDetected = false
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> applySettings() }
 
@@ -210,8 +212,10 @@ class ObdService : Service() {
             }
 
             attempt++
-            val backoff = (2000L * attempt).coerceAtMost(15000L)
-            ObdRepository.setStatusMessage("Retrying in " + backoff / 1000 + "s...")
+            ObdRepository.reconnects++
+            // The adapter is usually still there after a drop, so the first retry is quick.
+            val backoff = RETRY_DELAYS_MS[minOf(attempt, RETRY_DELAYS_MS.size) - 1]
+            ObdRepository.setStatusMessage("Reconnecting in " + (backoff + 999) / 1000 + "s (attempt " + attempt + ")")
             delay(backoff)
         }
     }
@@ -227,12 +231,18 @@ class ObdService : Service() {
         val pollable = Pids.ALL.filter { it.id in advertised }
         ObdRepository.publishSupported(pollable.map { it.id }.toSet())
 
-        readVehicleInfo(elm)
-        refreshDiagnostics(elm)
+        // Only the lamp state is needed up front (for alerts). Codes, VIN and freeze
+        // frame are slow reads, so they run as tasks once live data is already flowing.
+        elm.readStatus()?.let {
+            milOn = it.milOn
+            ObdRepository.publishMilStatus(it)
+        }
+        ObdRepository.submit(ObdRepository.Task.ReadVehicleInfo)
+        ObdRepository.submit(ObdRepository.Task.ReadDtcs)
 
         val fastIds = pollable.filter { it.tier == Pids.Tier.FAST }.map { it.id }.toSet()
         ObdRepository.setStatusMessage("Tuning polling speed...")
-        elm.configureFastMode(settings.fastPolling, advertised, fastIds)
+        elm.configureFastMode(fastModeAllowed(), advertised, fastIds)
         ObdRepository.publishPollMode(elm.modeLabel)
 
         if (settings.logging) logger = CsvLogger(this).also { it.start(advertised) }
@@ -246,11 +256,24 @@ class ObdService : Service() {
                 ObdRepository.trace("-- " + lost.message)
                 clearLive()
                 waitForEcu(elm)
-                // Modules can wake in a different state, so probe the speedups again.
-                elm.configureFastMode(settings.fastPolling, advertised, fastIds)
+                // Modules can wake in a different state, so probe the speedups again,
+                // unless they already failed on this adapter.
+                elm.configureFastMode(fastModeAllowed(), advertised, fastIds)
                 ObdRepository.publishPollMode(elm.modeLabel)
             }
         }
+    }
+
+    /** Fast polling, unless the user turned it off or it already failed on this adapter. */
+    private fun fastModeAllowed(): Boolean =
+        settings.fastPolling && prefs.fastModeBlockedFor != currentAddress
+
+    /** Remembers that this adapter cannot keep up with fast polling, so later connections skip it. */
+    private fun blockFastMode() {
+        val address = currentAddress ?: return
+        if (prefs.fastModeBlockedFor == address) return
+        prefs.fastModeBlockedFor = address
+        ObdRepository.trace("-- fast polling turned off for this adapter; Settings can turn it back on")
     }
 
     private suspend fun waitForEcu(elm: Elm327) {
@@ -279,7 +302,9 @@ class ObdService : Service() {
         val live = HashMap<Int, Float>()
         val updatedAt = HashMap<Int, Long>()
         val misses = HashMap<Int, Int>()
-        var emptyCycles = 0
+        var lastFreshAt = System.currentTimeMillis()
+        var lastProbeAt = 0L
+        var failedProbes = 0
         var cycle = 0L
         var rateWindowStart = System.currentTimeMillis()
         var rateCommands = elm.commandsSent
@@ -324,21 +349,37 @@ class ObdService : Service() {
             // so one dropped reply does not make a tile flicker.
             live.keys.retainAll { now - (updatedAt[it] ?: 0L) <= STALE_MS }
 
-            if (fresh.isEmpty() && requested.isNotEmpty()) {
-                emptyCycles++
-                if (emptyCycles == SAFE_MODE_AFTER && elm.fastModeActive) {
-                    ObdRepository.trace("-- no answers in fast mode; falling back to standard polling")
+            if (fresh.isNotEmpty()) {
+                lastFreshAt = now
+                failedProbes = 0
+                dropSilentPids(misses, scheduler, dropped, live)
+            } else if (requested.isNotEmpty()) {
+                val quietMs = now - lastFreshAt
+                if (quietMs >= FAST_MODE_GIVE_UP_MS && elm.fastModeActive) {
+                    // The speedups stopped working on this adapter. Fall back for good,
+                    // rather than re-enabling them later and failing again.
+                    ObdRepository.trace("-- no answers in fast mode; using standard polling")
                     elm.resetToSafeMode()
+                    blockFastMode()
                     ObdRepository.publishPollMode(elm.modeLabel)
                 }
-                if (emptyCycles >= ECU_LOST_AFTER) throw EcuLostException()
-            } else {
-                emptyCycles = 0
-                dropSilentPids(misses, scheduler, dropped, live)
+                // Silence alone is not proof the ignition is off: ask the ECU directly,
+                // and only give up after it fails to answer twice.
+                if (quietMs >= ECU_QUIET_MS && now - lastProbeAt >= ECU_QUIET_MS / 2) {
+                    lastProbeAt = now
+                    if (elm.ecuResponds()) {
+                        failedProbes = 0
+                        ObdRepository.trace("-- ECU still answers; waiting for polled values")
+                    } else if (++failedProbes >= ECU_LOST_PROBES) {
+                        throw EcuLostException()
+                    }
+                }
             }
 
-            publishCycle(live, fresh, now)
-            drainTasks(elm)
+            // A bug in the display maths must never take the connection down with it.
+            guard("display update") { publishCycle(live, fresh, now) }
+            guard("screen request") { drainTasks(elm) }
+            ObdRepository.adapterTimeouts = elm.timeouts
             cycle++
 
             if (now - rateWindowStart >= 1000) {
@@ -350,6 +391,30 @@ class ObdService : Service() {
                 gears.flush()
                 cng.flush()
                 lastGearFlushAt = now
+            }
+        }
+    }
+
+    private var lastBugReport = ""
+    private var lastBugReportAt = 0L
+
+    /**
+     * Runs [block], logging instead of propagating a runtime failure. Connection
+     * errors (IOException) are not caught: those really should reconnect.
+     */
+    private inline fun guard(where: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: RuntimeException) {
+            val frame = e.stackTrace.firstOrNull()?.let { " at " + it.className.substringAfterLast('.') + "." + it.methodName + ":" + it.lineNumber } ?: ""
+            val report = "!! internal error in " + where + ": " + e.javaClass.simpleName + " " + (e.message ?: "") + frame
+            val now = System.currentTimeMillis()
+            if (report != lastBugReport || now - lastBugReportAt > 30_000L) {
+                lastBugReport = report
+                lastBugReportAt = now
+                ObdRepository.trace(report)
             }
         }
     }
@@ -401,6 +466,12 @@ class ObdService : Service() {
         if (throttle != null && Pids.THROTTLE in fresh) closedThrottle.update(throttle)
         val throttleClosed = throttle?.let { closedThrottle.isClosed(it) }
 
+        // An ECU that reports burning CNG settles the fuel-system setting by itself.
+        if (!s.fuelSystem.usesCng && !cngAutoDetected && FuelSelector.fromObd(readings[Pids.FUEL_TYPE]) == Fuel.CNG) {
+            cngAutoDetected = true
+            prefs.fuelSystem = FuelSystem.PETROL_CNG
+            ObdRepository.trace("-- ECU reports CNG; fuel system set to Petrol + CNG")
+        }
         val fuel = FuelSelector.active(s, readings)
         val fuelFromEcu = s.fuelSystem.isBiFuel && s.fuelDetection == FuelDetection.AUTO &&
                 FuelSelector.reported(s, readings) != null
@@ -420,11 +491,9 @@ class ObdService : Service() {
 
         val speedFresh = Pids.SPEED in fresh
         val tripStats = synchronized(tripLock) {
-            val step = trip.update(
-                readings, fuel, fuelRate, power, boost, speedFresh, s,
-                cng.remainingKg(), cng.lifetimeKmPerKg(), now
-            )
-            if (step != null && step.fuel == Fuel.CNG) cng.burn(step.amount, step.km)
+            val cngTotals = if (s.fuelSystem.usesCng) cng.totals() else null
+            val step = trip.update(readings, fuel, fuelRate, power, boost, speedFresh, s, cngTotals, now)
+            if (step != null && step.fuel == Fuel.CNG) cng.burn(step.amount, step.km, step.runMs)
             trip.stats
         }
         if (speedFresh) perf.update(speed, now)
@@ -495,9 +564,13 @@ class ObdService : Service() {
                     lastGear = GearReading.UNKNOWN
                     ObdRepository.trace("-- learned gears cleared")
                 }
+                is ObdRepository.Task.ResetCngTotals -> {
+                    cng.resetTotals()
+                    ObdRepository.trace("-- CNG totals reset")
+                }
                 is ObdRepository.Task.CngFilled -> {
-                    cng.refill(task.kg)
-                    ObdRepository.trace("-- CNG fill-up logged: %.1f kg".format(task.kg))
+                    cng.refill(task.levelKg, task.filledKg)
+                    ObdRepository.trace("-- CNG fill-up logged: cylinder now %.1f kg".format(task.levelKg))
                 }
                 is ObdRepository.Task.Raw -> elm.sendRaw(task.command)
             }
@@ -606,9 +679,14 @@ class ObdService : Service() {
         /** How long a value that stopped arriving stays on screen. */
         private const val STALE_MS = 5_000L
 
-        /** Empty cycles before fast mode is abandoned, then before the ECU counts as gone. */
-        private const val SAFE_MODE_AFTER = 3
-        private const val ECU_LOST_AFTER = 8
+        /** Silence before fast mode is abandoned, and before the ECU is probed directly. */
+        private const val FAST_MODE_GIVE_UP_MS = 2_500L
+        private const val ECU_QUIET_MS = 6_000L
+
+        /** Failed direct probes before the ignition is taken to be off. */
+        private const val ECU_LOST_PROBES = 2
+
+        private val RETRY_DELAYS_MS = longArrayOf(800L, 2_000L, 4_000L, 8_000L, 15_000L)
 
         private const val DROP_AFTER_MISSES = 10
         private const val BATCHED_EXTRAS = 6

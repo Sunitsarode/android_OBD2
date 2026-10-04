@@ -18,6 +18,7 @@ class Prefs(context: Context) {
     private fun int(key: String, def: Int) = sp.getInt(key, def)
     private fun float(key: String, def: Float) = sp.getFloat(key, def)
     private fun str(key: String): String? = sp.getString(key, null)
+    private fun long(key: String, def: Long) = sp.getLong(key, def)
     private fun put(block: SharedPreferences.Editor.() -> Unit) = sp.edit().apply(block).apply()
 
     var imperialUnits: Boolean
@@ -54,9 +55,14 @@ class Prefs(context: Context) {
         get() = runCatching { FuelDetection.valueOf(str("fuelDetection") ?: "AUTO") }.getOrDefault(FuelDetection.AUTO)
         set(v) = put { putString("fuelDetection", v.name) }
 
-    /** The fuel chosen with the dashboard badge, used when detection is manual. */
+    /**
+     * The fuel assumed when the ECU does not say which one is burning. A bi-fuel
+     * CNG car spends nearly all its time on CNG, so that is the default until the
+     * driver taps the badge.
+     */
     var manualFuel: Fuel
-        get() = runCatching { Fuel.valueOf(str("manualFuel") ?: "PETROL") }.getOrDefault(Fuel.PETROL)
+        get() = str("manualFuel")?.let { saved -> runCatching { Fuel.valueOf(saved) }.getOrNull() }
+            ?: fuelSystem.secondary ?: fuelSystem.primary
         set(v) = put { putString("manualFuel", v.name) }
 
     /** Petrol or diesel price per litre. */
@@ -103,6 +109,28 @@ class Prefs(context: Context) {
     var cngLifetimeKg: Float
         get() = float("cngLifetimeKg", 0f)
         set(v) = put { putFloat("cngLifetimeKg", v) }
+
+    /** Engine running time on CNG, all drives. */
+    var cngLifetimeMs: Long
+        get() = long("cngLifetimeMs", 0L)
+        set(v) = put { putLong("cngLifetimeMs", v) }
+
+    var cngSinceFillKg: Float
+        get() = float("cngSinceFillKg", 0f)
+        set(v) = put { putFloat("cngSinceFillKg", v) }
+
+    var cngSinceFillKm: Float
+        get() = float("cngSinceFillKm", 0f)
+        set(v) = put { putFloat("cngSinceFillKm", v) }
+
+    var cngSinceFillMs: Long
+        get() = long("cngSinceFillMs", 0L)
+        set(v) = put { putLong("cngSinceFillMs", v) }
+
+    /** Measured km/kg: distance between fill-ups divided by the kg on the receipt. Negative means none yet. */
+    var cngLastFillKmPerKg: Float
+        get() = float("cngLastFillKmPerKg", -1f)
+        set(v) = put { putFloat("cngLastFillKmPerKg", v) }
 
     var redlineRpm: Int
         get() = int("redline", 6000)
@@ -184,6 +212,11 @@ class Prefs(context: Context) {
     var lastDeviceName: String?
         get() = str("deviceName")
         set(v) = put { putString("deviceName", v) }
+
+    /** Adapter address that failed fast polling; it gets standard polling until re-enabled. */
+    var fastModeBlockedFor: String?
+        get() = str("fastModeBlockedFor")
+        set(v) = put { putString("fastModeBlockedFor", v) }
 
     /** Protocol number learned from ATDPN, replayed to skip auto-detection. */
     var lastProtocol: String?

@@ -85,6 +85,13 @@ object Format {
         return FUEL_TYPES.getOrNull(index) ?: ("Code " + index)
     }
 
+    /** Engine run time: "42m", or "3h 05m" past an hour. Totals can run to hundreds of hours. */
+    fun runTime(seconds: Long?): String {
+        if (seconds == null) return "--"
+        val minutes = seconds / 60
+        return if (minutes < 60) minutes.toString() + "m" else "%dh %02dm".format(minutes / 60, minutes % 60)
+    }
+
     fun duration(seconds: Long) = Metrics.formatDuration(seconds)
 
     /**

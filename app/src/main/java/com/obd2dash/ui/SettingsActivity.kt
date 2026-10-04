@@ -1,5 +1,9 @@
 package com.obd2dash.ui
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.AdapterView
@@ -70,11 +74,19 @@ class SettingsActivity : AppCompatActivity() {
         binding.keepScreenOn.isChecked = prefs.keepScreenOn
         binding.autoConnect.isChecked = prefs.autoConnect
         binding.startOnBoot.isChecked = prefs.startOnBoot
-        binding.fastPolling.isChecked = prefs.fastPolling
+        // Fast polling switched off automatically for this adapter shows as unticked;
+        // ticking it again gives fast mode another try.
+        val fastBlocked = prefs.fastModeBlockedFor != null && prefs.fastModeBlockedFor == prefs.lastDeviceAddress
+        binding.fastPolling.isChecked = prefs.fastPolling && !fastBlocked
+        if (fastBlocked) {
+            binding.reconnectNote.text = "Fast polling was switched off for your adapter because it stopped " +
+                    "answering in fast mode. Tick it to try again. Changes apply on the next connection."
+        }
         binding.logging.isChecked = prefs.loggingEnabled
 
         binding.logPath.text = "Logs are written to " + File(getExternalFilesDir(null), "logs").absolutePath
         showLearnedGears()
+        showAndroidAutoHelp()
 
         binding.resetGears.setOnClickListener { confirmResetGears() }
         binding.save.setOnClickListener { save() }
@@ -83,6 +95,39 @@ class SettingsActivity : AppCompatActivity() {
     private fun Spinner.fill(labels: List<String>, selected: Int) {
         adapter = ArrayAdapter(this@SettingsActivity, android.R.layout.simple_spinner_dropdown_item, labels)
         setSelection(selected.coerceAtLeast(0))
+    }
+
+    /**
+     * Android Auto hides apps that were not installed from the Play Store until
+     * its developer setting allows them, which is the usual reason the app is
+     * missing from the car's launcher.
+     */
+    private fun showAndroidAutoHelp() {
+        val version = try {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(ANDROID_AUTO, 0).versionName ?: "?"
+        } catch (_: PackageManager.NameNotFoundException) {
+            null
+        }
+        binding.autoStatus.text = if (version == null) {
+            "Android Auto is not installed on this phone. Install it from the Play Store first."
+        } else {
+            "Android Auto " + version + " is installed. To show OBD2 Dashboard on the car screen:"
+        }
+        binding.autoSteps.text = AUTO_STEPS
+        binding.openAuto.isEnabled = version != null
+        binding.openAuto.setOnClickListener { openAndroidAuto() }
+    }
+
+    private fun openAndroidAuto() {
+        // On Android 10+ Android Auto lives inside system settings; its launch intent opens that page.
+        val intent = packageManager.getLaunchIntentForPackage(ANDROID_AUTO)
+            ?: Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ANDROID_AUTO))
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "Open Settings and search for Android Auto", Toast.LENGTH_LONG).show()
+        }
     }
 
     /** Only the fields that apply to the chosen fuel system are shown. */
@@ -176,10 +221,27 @@ class SettingsActivity : AppCompatActivity() {
         prefs.keepScreenOn = binding.keepScreenOn.isChecked
         prefs.autoConnect = binding.autoConnect.isChecked
         prefs.startOnBoot = binding.startOnBoot.isChecked
-        prefs.fastPolling = binding.fastPolling.isChecked
+        val wantFast = binding.fastPolling.isChecked
+        if (wantFast) prefs.fastModeBlockedFor = null
+        prefs.fastPolling = wantFast
         prefs.loggingEnabled = binding.logging.isChecked
 
         Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
         finish()
+    }
+
+    private companion object {
+        const val ANDROID_AUTO = "com.google.android.projection.gearhead"
+
+        val AUTO_STEPS = listOf(
+            "1. Tap Open Android Auto settings below.",
+            "2. Scroll to the bottom and tap Version about 10 times, then OK, to turn on developer mode.",
+            "3. Tap the three dots at the top right, open Developer settings, and turn on Unknown sources.",
+            "4. Go back, open Customize launcher, and make sure OBD2 Dashboard is ticked.",
+            "5. Disconnect the phone from the car and connect it again.",
+            "",
+            "OBD2 Dashboard then appears in the car's app list. Open this app on the phone once " +
+                    "first and connect to the adapter."
+        ).joinToString("\n")
     }
 }
